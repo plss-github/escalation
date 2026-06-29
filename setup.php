@@ -23,6 +23,9 @@ function plugin_init_escalation() {
 
   // Adiciona aba "Aprovação" na tela do chamado
   Plugin::registerClass('PluginEscalationTicketFlow', ['addtabon' => 'Ticket']);
+
+  // Adiciona aba "Escalation" em Configuração > Geral
+  Plugin::registerClass('PluginEscalationConfig', ['addtabon' => 'Config']);
 }
 
 function plugin_version_escalation() {

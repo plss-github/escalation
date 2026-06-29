@@ -81,8 +81,12 @@ class PluginEscalationApproval extends CommonDBTM {
     if (!$step->getFromDB($ts->fields['plugin_escalation_steps_id'])) return false;
 
     if ($step->fields['type'] === PluginEscalationStep::TYPE_HIERARCHY) {
-      // TODO: lógica de hierarquia
-      return true;
+      // Hierarquia: qualquer aprovador encontrado pode aprovar/reprovar (quórum min1)
+      $approvals  = self::countVotes($ticketstep_id, self::ACTION_APPROVE);
+      $rejections = self::countVotes($ticketstep_id, self::ACTION_REJECT);
+      if ($rejections > 0) return self::RESULT_REJECTED;
+      if ($approvals  > 0) return self::RESULT_APPROVED;
+      return false;
     }
 
     // Avaliar quórum

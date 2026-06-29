@@ -22,6 +22,7 @@ function plugin_escalation_install() {
     PluginEscalationTicketFlow::class,
     PluginEscalationTicketStep::class,
     PluginEscalationApproval::class,
+    PluginEscalationHierarchyLevel::class,
   ];
 
   foreach ($classesToInstall as $class) {
@@ -30,6 +31,9 @@ function plugin_escalation_install() {
     }
   }
   $migration->executeMigration();
+
+  // Inicializa valores padrão das configurações globais do plugin
+  PluginEscalationConfig::setDefaults();
 
   // Registra a tarefa de cron para verificar timeouts de aprovação.
   // MODE_INTERNAL = executado pelo agendador interno do GLPI (sem cron externo necessário).
@@ -61,6 +65,7 @@ function plugin_escalation_uninstall() {
   echo "<tr class='tab_bg_1'><td align='center'>";
 
   $classesToUninstall = [
+    'PluginEscalationHierarchyLevel',
     'PluginEscalationApproval',
     'PluginEscalationTicketStep',
     'PluginEscalationTicketFlow',
@@ -87,6 +92,9 @@ function plugin_escalation_uninstall() {
 
   // Remove todas as tarefas de cron registradas pelo plugin
   CronTask::unregister('escalation');
+
+  // Remove configurações globais do plugin
+  PluginEscalationConfig::removeConfig();
 
   $pref = new DisplayPreference();
   $pref->deleteByCriteria(['itemtype' => ['LIKE', 'PluginEscalation%']]);

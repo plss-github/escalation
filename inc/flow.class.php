@@ -28,7 +28,7 @@ class PluginEscalationFlow extends CommonDBTM {
         `name` varchar(255) COLLATE {$default_collation} NOT NULL,
         `is_active` tinyint(1) NOT NULL DEFAULT '0',
         `itilcategories_id` int {$default_key_sign} NOT NULL DEFAULT '0',
-        `timeout_hours` int NOT NULL DEFAULT '0',
+        `timeout_days` int NOT NULL DEFAULT '0',
         `date_mod` timestamp NULL DEFAULT NULL,
         `date_creation` timestamp NULL DEFAULT NULL,
         PRIMARY KEY (`id`),
@@ -39,8 +39,10 @@ class PluginEscalationFlow extends CommonDBTM {
       if (!$DB->fieldExists(self::getTable(), 'itilcategories_id')) {
         $migration->addField(self::getTable(), 'itilcategories_id', "int {$default_key_sign} NOT NULL DEFAULT '0'");
       }
-      if (!$DB->fieldExists(self::getTable(), 'timeout_hours')) {
-        $migration->addField(self::getTable(), 'timeout_hours', "int NOT NULL DEFAULT '0'");
+      if ($DB->fieldExists(self::getTable(), 'timeout_hours') && !$DB->fieldExists(self::getTable(), 'timeout_days')) {
+        $DB->doQuery("ALTER TABLE `" . self::getTable() . "` CHANGE `timeout_hours` `timeout_days` int NOT NULL DEFAULT '0'");
+      } elseif (!$DB->fieldExists(self::getTable(), 'timeout_days')) {
+        $migration->addField(self::getTable(), 'timeout_days', "int NOT NULL DEFAULT '0'");
       }
     }
   }
@@ -84,8 +86,8 @@ class PluginEscalationFlow extends CommonDBTM {
       'name' => __('Categoria ITIL', 'escalation'), 'datatype' => 'dropdown', 'massiveaction' => true,
     ];
     $tab[] = [
-      'id' => '4', 'table' => $this->getTable(), 'field' => 'timeout_hours',
-      'name' => __('Timeout global (horas)', 'escalation'), 'datatype' => 'number', 'massiveaction' => false,
+      'id' => '4', 'table' => $this->getTable(), 'field' => 'timeout_days',
+      'name' => __('Reprovação automática global (dias)', 'escalation'), 'datatype' => 'number', 'massiveaction' => false,
     ];
     return $tab;
   }
@@ -106,10 +108,10 @@ class PluginEscalationFlow extends CommonDBTM {
     echo "<td>";
     ITILCategory::dropdown(['value' => $this->fields['itilcategories_id'], 'name' => 'itilcategories_id']);
     echo "</td>";
-    echo "<td>" . __('Timeout global (horas)', 'escalation') . "</td>";
+    echo "<td>" . __('Reprovação automática global (dias)', 'escalation') . "</td>";
     echo "<td>";
-    echo Html::input('timeout_hours', ['value' => $this->fields['timeout_hours'] ?? 0, 'type' => 'number', 'min' => '0', 'style' => 'width:80px']);
-    echo " <small>" . __('0 = sem timeout', 'escalation') . "</small>";
+    echo Html::input('timeout_days', ['value' => (int)($this->fields['timeout_days'] ?? 0), 'type' => 'number', 'min' => '0', 'style' => 'width:80px']);
+    echo " <small>" . __('0 = sem reprovação automática', 'escalation') . "</small>";
     echo "</td>";
     echo "</tr>";
 

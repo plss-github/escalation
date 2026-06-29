@@ -203,7 +203,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         $msg = sprintf(__('✅ Fluxo de aprovação "%s" concluído. Chamado aprovado.', 'escalation'), $flow_name);
         break;
       case self::STATUS_TIMED_OUT:
-        $msg = sprintf(__('⏰ Fluxo de aprovação "%s" expirou por timeout. Chamado reprovado automaticamente.', 'escalation'), $flow_name);
+        $msg = sprintf(__('⏰ Fluxo de aprovação "%s" atingiu o prazo de reprovação automática. Chamado reprovado automaticamente.', 'escalation'), $flow_name);
         break;
       default:
         $msg = sprintf(__('❌ Fluxo de aprovação "%s" concluído. Chamado reprovado.', 'escalation'), $flow_name);
@@ -246,12 +246,13 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     ], ['id' => $ticketstep_id]);
 
     if ($step_data['type'] === PluginEscalationStep::TYPE_HIERARCHY) {
-      // TODO: implementar lógica de hierarquia
-      return;
+      $approvers = self::resolveHierarchyApprovers($ticket, (int) ($step_data['hierarchy_level'] ?? 1));
+    } else {
+      // Tipo PEOPLE: resolver aprovadores a partir das fontes configuradas
+      $approvers = self::resolveApprovers($step_data, $ticket);
     }
 
-    // Tipo PEOPLE: resolver aprovadores e gravar em ticketstepapprovers
-    $approvers = self::resolveApprovers($step_data, $ticket);
+    // Gravar aprovadores em ticketstepapprovers
 
     foreach ($approvers as $user_id) {
       // Verificar se já não está na lista (idempotência)
@@ -334,6 +335,51 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   }
 
   // -------------------------------------------------------------------------
+  // Resolução de aprovadores por hierarquia
+  // -------------------------------------------------------------------------
+
+  /**
+   * Encontra aprovadores para uma etapa de hierarquia.
+   *
+   * Para cada técnico responsável pelo chamado, sobe a cadeia de supervisores
+   * até encontrar alguém cujo nível hierárquico seja <= $required_level.
+   */
+  static function resolveHierarchyApprovers(Ticket $ticket, int $required_level): array {
+    $assigned = self::getTicketActors($ticket->getID(), CommonITILActor::ASSIGN);
+    $approvers = [];
+    foreach ($assigned as $user_id) {
+      $found = self::traverseHierarchy((int) $user_id, $required_level);
+      if ($found !== null) {
+        $approvers[] = $found;
+      }
+    }
+    return array_values(array_unique(array_filter($approvers)));
+  }
+
+  /**
+   * Sobe a cadeia de supervisores a partir de $user_id até encontrar
+   * alguém com nível hierárquico <= $required_level.
+   *
+   * Retorna o users_id do aprovador encontrado, ou null se não houver.
+   */
+  static function traverseHierarchy(int $user_id, int $required_level, int $depth = 0): ?int {
+    if ($depth > 20 || $user_id <= 0) return null;
+
+    $level = PluginEscalationHierarchyLevel::getUserLevel($user_id);
+    if ($level !== null && $level <= $required_level) {
+      return $user_id;
+    }
+
+    $user = new User();
+    if (!$user->getFromDB($user_id)) return null;
+
+    $supervisor_id = (int) ($user->fields['users_id_supervisor'] ?? 0);
+    if ($supervisor_id <= 0 || $supervisor_id === $user_id) return null;
+
+    return self::traverseHierarchy($supervisor_id, $required_level, $depth + 1);
+  }
+
+  // -------------------------------------------------------------------------
   // UI da aba "Aprovação" no chamado
   // -------------------------------------------------------------------------
 
@@ -343,7 +389,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     $ticket_id = $ticket->getID();
 
     $flows = $DB->request([
-      'SELECT' => ['tf.*', 'f.name AS flow_name', 'f.timeout_hours AS flow_timeout'],
+      'SELECT' => ['tf.*', 'f.name AS flow_name', 'f.timeout_days AS flow_timeout'],
       'FROM'   => self::getTable() . ' AS tf',
       'INNER JOIN' => [
         PluginEscalationFlow::getTable() . ' AS f' => ['ON' => ['tf' => 'plugin_escalation_flows_id', 'f' => 'id']]
@@ -432,7 +478,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   static function cronInfo(string $name): array {
     switch ($name) {
       case 'checktimeouts':
-        return ['description' => __('Verifica e expira etapas/fluxos de aprovação que ultrapassaram o timeout configurado.', 'escalation')];
+        return ['description' => __('Verifica e reprova automaticamente etapas/fluxos de aprovação que ultrapassaram o prazo configurado.', 'escalation')];
     }
     return [];
   }
@@ -455,7 +501,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         'ts.id',
         'ts.plugin_escalation_ticketflows_id',
         'ts.started_at',
-        's.timeout_hours',
+        's.timeout_days',
         's.name AS step_name',
       ],
       'FROM'       => PluginEscalationTicketStep::getTable() . ' AS ts',
@@ -466,13 +512,13 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       ],
       'WHERE'      => [
         'ts.status' => PluginEscalationTicketStep::STATUS_PENDING,
-        ['s.timeout_hours' => ['>', 0]],
+        ['s.timeout_days' => ['>', 0]],
         ['ts.started_at'   => ['!=', null]],
       ],
     ]);
 
     foreach ($step_iterator as $row) {
-      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_hours'] * 3600);
+      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_days'] * 86400);
       if ($expire_at > $now) continue;
 
       // Marcar etapa como expirada
@@ -483,14 +529,14 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         'completed_at' => date('Y-m-d H:i:s'),
       ]);
 
-      // Encerrar o fluxo como timed out
+      // Encerrar o fluxo como reprovação automática
       self::completeFlow((int) $row['plugin_escalation_ticketflows_id'], self::STATUS_TIMED_OUT);
 
       $task->log(sprintf(
-        __('Etapa "%s" (ID %d) expirou por timeout de %dh.', 'escalation'),
+        __('Etapa "%s" (ID %d) sofreu reprovação automática após %d dia(s).', 'escalation'),
         $row['step_name'],
         $row['id'],
-        $row['timeout_hours']
+        $row['timeout_days']
       ));
 
       $volume++;
@@ -503,7 +549,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       'SELECT'     => [
         'tf.id',
         'tf.started_at',
-        'f.timeout_hours',
+        'f.timeout_days',
         'f.name AS flow_name',
       ],
       'FROM'       => self::getTable() . ' AS tf',
@@ -514,13 +560,13 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       ],
       'WHERE'      => [
         'tf.status'       => self::STATUS_PENDING,
-        ['f.timeout_hours' => ['>', 0]],
+        ['f.timeout_days' => ['>', 0]],
         ['tf.started_at'   => ['!=', null]],
       ],
     ]);
 
     foreach ($flow_iterator as $row) {
-      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_hours'] * 3600);
+      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_days'] * 86400);
       if ($expire_at > $now) continue;
 
       // Marcar etapas WAITING/PENDING como expiradas antes de fechar o fluxo
@@ -538,10 +584,10 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       self::completeFlow((int) $row['id'], self::STATUS_TIMED_OUT);
 
       $task->log(sprintf(
-        __('Fluxo "%s" (ID %d) expirou por timeout global de %dh.', 'escalation'),
+        __('Fluxo "%s" (ID %d) sofreu reprovação automática global após %d dia(s).', 'escalation'),
         $row['flow_name'],
         $row['id'],
-        $row['timeout_hours']
+        $row['timeout_days']
       ));
 
       $volume++;
@@ -556,7 +602,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       self::STATUS_PENDING   => '<span style="color:#d97706">⏳ ' . __('Pendente', 'escalation') . '</span>',
       self::STATUS_APPROVED  => '<span style="color:#16a34a">✅ ' . __('Aprovado', 'escalation') . '</span>',
       self::STATUS_REJECTED  => '<span style="color:#dc2626">❌ ' . __('Reprovado', 'escalation') . '</span>',
-      self::STATUS_TIMED_OUT => '<span style="color:#6b7280">⏰ ' . __('Timeout', 'escalation') . '</span>',
+      self::STATUS_TIMED_OUT => '<span style="color:#6b7280">⏰ ' . __('Reprovação automática', 'escalation') . '</span>',
     ];
     return $labels[$status] ?? $status;
   }

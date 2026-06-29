@@ -73,7 +73,7 @@ class PluginEscalationTicketStep extends CommonDBTM {
       self::STATUS_PENDING   => '<span style="color:#d97706">⏳ ' . __('Pendente', 'escalation') . '</span>',
       self::STATUS_APPROVED  => '<span style="color:#16a34a">✅ ' . __('Aprovado', 'escalation') . '</span>',
       self::STATUS_REJECTED  => '<span style="color:#dc2626">❌ ' . __('Reprovado', 'escalation') . '</span>',
-      self::STATUS_TIMED_OUT => '<span style="color:#6b7280">⏰ ' . __('Timeout', 'escalation') . '</span>',
+      self::STATUS_TIMED_OUT => '<span style="color:#6b7280">⏰ ' . __('Reprovação automática', 'escalation') . '</span>',
     ];
     return $labels[$status] ?? (string) $status;
   }

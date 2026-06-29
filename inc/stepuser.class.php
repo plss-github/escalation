@@ -63,6 +63,7 @@ class PluginEscalationStepUser extends CommonDBTM {
         $name = $user->getFromDB($u['users_id']) ? $user->getFriendlyName() : '#' . $u['users_id'];
         echo "<tr class='tab_bg_1'><td>" . htmlspecialchars($name) . "</td><td>";
         echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
+        echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
         echo "<input type='hidden' name='id' value='" . $u['id'] . "'>";
         echo "<input type='hidden' name='plugin_escalation_steps_id' value='$step_id'>";
         echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
@@ -75,6 +76,7 @@ class PluginEscalationStepUser extends CommonDBTM {
     }
 
     echo "<form style='display:inline-flex;gap:8px;align-items:center' action='" . static::getFormURL() . "' method='post'>";
+    echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
     echo "<input type='hidden' name='plugin_escalation_steps_id' value='$step_id'>";
     echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
     User::dropdown(['name' => 'users_id', 'right' => 'all']);
