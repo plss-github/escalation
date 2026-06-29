@@ -1,0 +1,33 @@
+# Portuguese (Brazil) translations for escalation plugin.
+# Copyright (C) 2026 Ampris
+# This file is distributed under the same license as the escalation package.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-06-28 00:00-0300\n"
+"PO-Revision-Date: 2026-06-28 00:00-0300\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"X-Generator: Poedit 3.9\n"
+
+#: inc/flow.class.php:11
+msgid "Fluxo de Aprovação"
+msgid_plural "Fluxos de Aprovação"
+msgstr[0] "Fluxo de Aprovação"
+msgstr[1] "Fluxos de Aprovação"
+
+#: hook.php:11 hook.php:15
+msgid "MySQL instalação das tables"
+msgstr "MySQL instalação das tabelas"
+
+#: hook.php:53
+msgid "MySQL desinstalação das tables"
+msgstr "MySQL desinstalação das tabelas"

@@ -1,0 +1,325 @@
+<?php
+
+if (!defined('GLPI_ROOT')) {
+  die("Sorry. You can't access this file directly");
+}
+
+class PluginEscalationStep extends CommonDBTM {
+  static $rightname = 'config';
+
+  // Tipos de etapa
+  const TYPE_PEOPLE    = 'people';
+  const TYPE_HIERARCHY = 'hierarchy';
+
+  // Tipos de quórum (apenas para TYPE_PEOPLE)
+  const QUORUM_MIN1     = 'min1';
+  const QUORUM_MAJORITY = 'majority';
+  const QUORUM_ALL      = 'all';
+
+  static function getTypeName($nb = 0) {
+    return _n('Etapa', 'Etapas', $nb, 'escalation');
+  }
+
+  static function installBaseData(Migration $migration, $version) {
+    global $DB;
+
+    $default_charset   = DBConnection::getDefaultCharset();
+    $default_collation = DBConnection::getDefaultCollation();
+    $default_key_sign  = DBConnection::getDefaultPrimaryKeySignOption();
+
+    if (!$DB->tableExists(self::getTable())) {
+      $DB->doQuery("CREATE TABLE `" . self::getTable() . "` (
+        `id` int {$default_key_sign} NOT NULL AUTO_INCREMENT,
+        `plugin_escalation_flows_id` int {$default_key_sign} NOT NULL DEFAULT '0',
+        `name` varchar(255) COLLATE {$default_collation} NOT NULL,
+        `type` varchar(32) COLLATE {$default_collation} NOT NULL DEFAULT '" . self::TYPE_PEOPLE . "',
+        `step_order` int NOT NULL DEFAULT '0',
+        `timeout_hours` int NOT NULL DEFAULT '0',
+        `quorum_type` varchar(32) COLLATE {$default_collation} NOT NULL DEFAULT '" . self::QUORUM_MIN1 . "',
+        `include_requesters` tinyint(1) NOT NULL DEFAULT '0',
+        `include_assigned` tinyint(1) NOT NULL DEFAULT '0',
+        `include_observers` tinyint(1) NOT NULL DEFAULT '0',
+        PRIMARY KEY (`id`),
+        KEY `plugin_escalation_flows_id` (`plugin_escalation_flows_id`),
+        KEY `step_order` (`step_order`)
+      ) ENGINE=InnoDB DEFAULT CHARSET={$default_charset} COLLATE={$default_collation};");
+    }
+  }
+
+  static function uninstall() {
+    global $DB;
+    $DB->dropTable(self::getTable());
+    return true;
+  }
+
+  public function cleanDBonPurge() {
+    global $DB;
+    $DB->delete(PluginEscalationStepUser::getTable(), ['plugin_escalation_steps_id' => $this->fields['id']]);
+  }
+
+  static function canCreate(): bool { return Session::haveRight(self::$rightname, UPDATE); }
+  static function canView(): bool   { return Session::haveRight(self::$rightname, READ); }
+  static function canUpdate(): bool { return Session::haveRight(self::$rightname, UPDATE); }
+  static function canPurge(): bool  { return Session::haveRight(self::$rightname, UPDATE); }
+
+  static function getTypeOptions(): array {
+    return [
+      self::TYPE_PEOPLE    => __('Pessoas', 'escalation'),
+      self::TYPE_HIERARCHY => __('Hierarquia', 'escalation'),
+    ];
+  }
+
+  static function getQuorumOptions(): array {
+    return [
+      self::QUORUM_MIN1     => __('Mínimo 1', 'escalation'),
+      self::QUORUM_MAJORITY => __('Maioria', 'escalation'),
+      self::QUORUM_ALL      => __('Todos', 'escalation'),
+    ];
+  }
+
+  static function getTypeName_($type): string {
+    return self::getTypeOptions()[$type] ?? $type;
+  }
+
+  static function getQuorumName($quorum): string {
+    return self::getQuorumOptions()[$quorum] ?? $quorum;
+  }
+
+  // -------------------------------------------------------------------------
+  // Builder UI (exibida na aba "Etapas" do fluxo)
+  // -------------------------------------------------------------------------
+
+  static function showForFlow(PluginEscalationFlow $flow) {
+    global $DB;
+
+    $flow_id = $flow->getID();
+    if (!$flow->can($flow_id, READ)) return false;
+    $canedit = $flow->can($flow_id, UPDATE);
+
+    // Formulário para adicionar etapa
+    if ($canedit) {
+      echo "<form action='" . static::getFormURL() . "' method='post'>";
+      echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
+      echo "<table class='tab_cadre_fixe'>";
+      echo "<tr class='tab_bg_1'><th colspan='6'>" . __('Adicionar Etapa', 'escalation') . "</th></tr>";
+      echo "<tr class='tab_bg_2'>";
+
+      echo "<td>" . __('Nome', 'escalation') . "</td>";
+      echo "<td>" . Html::input('name', ['style' => 'width:180px']) . "</td>";
+
+      echo "<td>" . __('Tipo', 'escalation') . "</td>";
+      echo "<td>";
+      $type_options = self::getTypeOptions();
+      Dropdown::showFromArray('type', $type_options, ['value' => self::TYPE_PEOPLE]);
+      echo "</td>";
+
+      echo "<td>" . __('Timeout (h)', 'escalation') . "</td>";
+      echo "<td>";
+      echo Html::input('timeout_hours', ['value' => '0', 'type' => 'number', 'min' => '0', 'style' => 'width:60px']);
+      echo "&nbsp;<button type='submit' name='add' class='vsubmit' style='display:inline-flex;gap:6px'>";
+      echo "<i class='fas fa-plus'></i> " . _sx('button', 'Add') . "</button>";
+      echo "</td>";
+      echo "</tr></table>";
+      Html::closeForm();
+    }
+
+    // Lista de etapas
+    $steps = $DB->request([
+      'FROM'    => self::getTable(),
+      'WHERE'   => ['plugin_escalation_flows_id' => $flow_id],
+      'ORDERBY' => ['step_order ASC'],
+    ]);
+
+    $steps_array = iterator_to_array($steps);
+    if (empty($steps_array)) {
+      echo "<p class='center'>" . __('Nenhuma etapa configurada.', 'escalation') . "</p>";
+      return true;
+    }
+
+    echo "<div class='spaced'>";
+    echo "<table class='tab_cadre_fixehov'>";
+    echo "<tr class='headerRow'>";
+    echo "<th>#</th>";
+    echo "<th>" . __('Nome', 'escalation') . "</th>";
+    echo "<th>" . __('Tipo', 'escalation') . "</th>";
+    echo "<th>" . __('Quórum', 'escalation') . "</th>";
+    echo "<th>" . __('Timeout', 'escalation') . "</th>";
+    echo "<th>" . __('Fontes', 'escalation') . "</th>";
+    if ($canedit) echo "<th>" . __('Ações', 'escalation') . "</th>";
+    echo "</tr>";
+
+    $total = count($steps_array);
+    foreach ($steps_array as $i => $step) {
+      $sources = self::buildSourcesLabel($step);
+      echo "<tr class='tab_bg_" . (($i % 2) + 1) . "'>";
+      echo "<td>" . ($i + 1) . "</td>";
+      echo "<td><a href='" . static::getFormURL() . "?id=" . $step['id'] . "'>" . htmlspecialchars($step['name']) . "</a></td>";
+      echo "<td>" . self::getTypeName_($step['type']) . "</td>";
+      echo "<td>" . ($step['type'] === self::TYPE_PEOPLE ? self::getQuorumName($step['quorum_type']) : '—') . "</td>";
+      echo "<td>" . ($step['timeout_hours'] > 0 ? $step['timeout_hours'] . 'h' : '—') . "</td>";
+      echo "<td>" . htmlspecialchars($sources) . "</td>";
+
+      if ($canedit) {
+        echo "<td style='white-space:nowrap'>";
+
+        // Mover para cima
+        if ($i > 0) {
+          echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
+          echo "<input type='hidden' name='id' value='" . $step['id'] . "'>";
+          echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
+          echo "<button name='move_up' type='submit' class='vsubmit btn-sm' title='" . __('Mover para cima', 'escalation') . "' style='padding:2px 6px'><i class='fas fa-arrow-up'></i></button>";
+          Html::closeForm();
+        }
+
+        // Mover para baixo
+        if ($i < $total - 1) {
+          echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
+          echo "<input type='hidden' name='id' value='" . $step['id'] . "'>";
+          echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
+          echo "<button name='move_down' type='submit' class='vsubmit btn-sm' title='" . __('Mover para baixo', 'escalation') . "' style='padding:2px 6px'><i class='fas fa-arrow-down'></i></button>";
+          Html::closeForm();
+        }
+
+        echo "&nbsp;<a href='" . static::getFormURL() . "?id=" . $step['id'] . "' class='vsubmit btn-sm' style='padding:2px 8px'><i class='fas fa-edit'></i></a>";
+
+        echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
+        echo "<input type='hidden' name='id' value='" . $step['id'] . "'>";
+        echo "<button name='purge' type='submit' class='vsubmit btn-sm' style='background:#ef4444;border-color:#ef4444;padding:2px 6px' onclick=\"return confirm('" . __('Excluir esta etapa?', 'escalation') . "')\">";
+        echo "<i class='fas fa-trash-alt'></i></button>";
+        Html::closeForm();
+
+        echo "</td>";
+      }
+      echo "</tr>";
+    }
+    echo "</table></div>";
+    return true;
+  }
+
+  static function showForm($ID, array $options = []) {
+    global $DB;
+
+    $step = new self();
+    if ($ID > 0) {
+      $step->getFromDB($ID);
+    } else {
+      $step->getEmpty();
+    }
+    $flow_id = $step->fields['plugin_escalation_flows_id'] ?? ($_GET['plugin_escalation_flows_id'] ?? 0);
+
+    $step->initForm($ID, $options);
+    $step->showFormHeader($options);
+
+    echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
+
+    echo "<tr class='tab_bg_1'>";
+    echo "<td>" . __('Nome', 'escalation') . "</td>";
+    echo "<td>" . Html::input('name', ['value' => $step->fields['name']]) . "</td>";
+    echo "<td>" . __('Tipo', 'escalation') . "</td>";
+    echo "<td>";
+    Dropdown::showFromArray('type', self::getTypeOptions(), ['value' => $step->fields['type'] ?? self::TYPE_PEOPLE]);
+    echo "</td>";
+    echo "</tr>";
+
+    echo "<tr class='tab_bg_1'>";
+    echo "<td>" . __('Timeout (horas)', 'escalation') . "</td>";
+    echo "<td>";
+    echo Html::input('timeout_hours', ['value' => $step->fields['timeout_hours'] ?? 0, 'type' => 'number', 'min' => '0', 'style' => 'width:80px']);
+    echo " <small>" . __('0 = sem timeout', 'escalation') . "</small>";
+    echo "</td>";
+    echo "<td colspan='2'></td>";
+    echo "</tr>";
+
+    // Campos específicos para tipo "Pessoas"
+    echo "<tr class='tab_bg_1' id='people_fields'>";
+    echo "<td>" . __('Quórum', 'escalation') . "</td>";
+    echo "<td>";
+    Dropdown::showFromArray('quorum_type', self::getQuorumOptions(), ['value' => $step->fields['quorum_type'] ?? self::QUORUM_MIN1]);
+    echo "</td>";
+    echo "<td>" . __('Fontes de aprovadores', 'escalation') . "</td>";
+    echo "<td>";
+    echo "<label><input type='checkbox' name='include_requesters' value='1'" . (!empty($step->fields['include_requesters']) ? ' checked' : '') . "> " . __('Solicitantes', 'escalation') . "</label>&nbsp;&nbsp;";
+    echo "<label><input type='checkbox' name='include_assigned' value='1'" . (!empty($step->fields['include_assigned']) ? ' checked' : '') . "> " . __('Responsáveis', 'escalation') . "</label>&nbsp;&nbsp;";
+    echo "<label><input type='checkbox' name='include_observers' value='1'" . (!empty($step->fields['include_observers']) ? ' checked' : '') . "> " . __('Observadores', 'escalation') . "</label>";
+    echo "</td>";
+    echo "</tr>";
+
+    // Usuários específicos (apenas ao editar)
+    if ($ID > 0) {
+      echo "<tr class='tab_bg_1'>";
+      echo "<td valign='top'>" . __('Usuários específicos', 'escalation') . "</td>";
+      echo "<td colspan='3'>";
+      PluginEscalationStepUser::showForStep($step, $flow_id);
+      echo "</td>";
+      echo "</tr>";
+    }
+
+    $step->showFormButtons($options);
+    return true;
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
+
+  static function buildSourcesLabel(array $step): string {
+    $parts = [];
+    if ($step['include_requesters']) $parts[] = __('Solicitantes', 'escalation');
+    if ($step['include_assigned'])   $parts[] = __('Responsáveis', 'escalation');
+    if ($step['include_observers'])  $parts[] = __('Observadores', 'escalation');
+
+    $users = PluginEscalationStepUser::getUsersForStep($step['id']);
+    foreach ($users as $u) {
+      $user = new User();
+      if ($user->getFromDB($u['users_id'])) {
+        $parts[] = $user->getFriendlyName();
+      }
+    }
+    return empty($parts) ? '—' : implode(', ', $parts);
+  }
+
+  static function getNextOrder(int $flow_id): int {
+    global $DB;
+    $row = $DB->request([
+      'SELECT' => ['MAX' => 'step_order AS max_order'],
+      'FROM'   => self::getTable(),
+      'WHERE'  => ['plugin_escalation_flows_id' => $flow_id],
+    ])->current();
+    return ($row['max_order'] ?? 0) + 1;
+  }
+
+  static function swapOrder(int $id_a, int $id_b): void {
+    global $DB;
+    $a = (new self());
+    $a->getFromDB($id_a);
+    $b = (new self());
+    $b->getFromDB($id_b);
+    $DB->update(self::getTable(), ['step_order' => $b->fields['step_order']], ['id' => $id_a]);
+    $DB->update(self::getTable(), ['step_order' => $a->fields['step_order']], ['id' => $id_b]);
+  }
+
+  static function getAdjacentStep(int $id, string $direction): ?array {
+    global $DB;
+    $current = (new self());
+    $current->getFromDB($id);
+    $flow_id = $current->fields['plugin_escalation_flows_id'];
+    $order   = $current->fields['step_order'];
+
+    if ($direction === 'up') {
+      $row = $DB->request([
+        'FROM'    => self::getTable(),
+        'WHERE'   => ['plugin_escalation_flows_id' => $flow_id, ['step_order' => ['<', $order]]],
+        'ORDERBY' => ['step_order DESC'],
+        'LIMIT'   => 1,
+      ])->current();
+    } else {
+      $row = $DB->request([
+        'FROM'    => self::getTable(),
+        'WHERE'   => ['plugin_escalation_flows_id' => $flow_id, ['step_order' => ['>', $order]]],
+        'ORDERBY' => ['step_order ASC'],
+        'LIMIT'   => 1,
+      ])->current();
+    }
+    return $row ?: null;
+  }
+}

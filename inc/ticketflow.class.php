@@ -1,0 +1,563 @@
+<?php
+
+if (!defined('GLPI_ROOT')) {
+  die("Sorry. You can't access this file directly");
+}
+
+/**
+ * Acompanha o estado de um fluxo de aprovação em andamento para um chamado.
+ * Implementa a aba "Aprovação" dentro da tela do chamado.
+ */
+class PluginEscalationTicketFlow extends CommonDBTM {
+  static $rightname = 'config';
+
+  const STATUS_PENDING    = 0;
+  const STATUS_APPROVED   = 1;
+  const STATUS_REJECTED   = 2;
+  const STATUS_TIMED_OUT  = 3;
+
+  static function getTypeName($nb = 0) {
+    return _n('Fluxo do Chamado', 'Fluxos do Chamado', $nb, 'escalation');
+  }
+
+  static function installBaseData(Migration $migration, $version) {
+    global $DB;
+
+    $default_charset   = DBConnection::getDefaultCharset();
+    $default_collation = DBConnection::getDefaultCollation();
+    $default_key_sign  = DBConnection::getDefaultPrimaryKeySignOption();
+
+    if (!$DB->tableExists(self::getTable())) {
+      $DB->doQuery("CREATE TABLE `" . self::getTable() . "` (
+        `id` int {$default_key_sign} NOT NULL AUTO_INCREMENT,
+        `tickets_id` int {$default_key_sign} NOT NULL DEFAULT '0',
+        `plugin_escalation_flows_id` int {$default_key_sign} NOT NULL DEFAULT '0',
+        `status` tinyint(1) NOT NULL DEFAULT '0',
+        `current_step` int NOT NULL DEFAULT '1',
+        `started_at` timestamp NULL DEFAULT NULL,
+        `date_mod` timestamp NULL DEFAULT NULL,
+        PRIMARY KEY (`id`),
+        KEY `tickets_id` (`tickets_id`),
+        KEY `status` (`status`)
+      ) ENGINE=InnoDB DEFAULT CHARSET={$default_charset} COLLATE={$default_collation};");
+    }
+  }
+
+  static function uninstall() {
+    global $DB;
+    $DB->dropTable(self::getTable());
+    return true;
+  }
+
+  static function canCreate(): bool { return Session::haveRight(self::$rightname, UPDATE); }
+  static function canView(): bool   { return true; } // qualquer usuário logado pode ver o status
+  static function canUpdate(): bool { return Session::haveRight(self::$rightname, UPDATE); }
+
+  // -------------------------------------------------------------------------
+  // Aba no chamado
+  // -------------------------------------------------------------------------
+
+  public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0) {
+    if ($item->getType() === 'Ticket') {
+      $count = self::countActiveFlows($item->getID());
+      return [1 => self::createTabEntry(__('Aprovação', 'escalation'), $count)];
+    }
+    return '';
+  }
+
+  public static function displayTabContentForItem(CommonGLPI $item, $tabnum = 1, $withtemplate = 0) {
+    if ($item->getType() === 'Ticket' && $tabnum == 1) {
+      self::showApprovalTab($item);
+    }
+    return true;
+  }
+
+  static function countActiveFlows(int $ticket_id): int {
+    global $DB;
+    return count($DB->request([
+      'FROM'  => self::getTable(),
+      'WHERE' => ['tickets_id' => $ticket_id],
+    ]));
+  }
+
+  // -------------------------------------------------------------------------
+  // Lógica do fluxo
+  // -------------------------------------------------------------------------
+
+  /**
+   * Inicia um fluxo de aprovação para um chamado.
+   * Chamado por PluginEscalationFlow::ticketAdd.
+   */
+  static function startFlow(Ticket $ticket, int $flow_id): void {
+    global $DB;
+
+    $ticket_id = $ticket->getID();
+
+    // Verificar se já existe um fluxo ativo para este flow_id neste chamado
+    $existing = $DB->request([
+      'FROM'  => self::getTable(),
+      'WHERE' => ['tickets_id' => $ticket_id, 'plugin_escalation_flows_id' => $flow_id],
+    ]);
+    if (count($existing) > 0) return;
+
+    // Verificar se o fluxo tem etapas
+    $steps = $DB->request([
+      'FROM'    => PluginEscalationStep::getTable(),
+      'WHERE'   => ['plugin_escalation_flows_id' => $flow_id],
+      'ORDERBY' => ['step_order ASC'],
+    ]);
+    $steps_array = iterator_to_array($steps);
+    if (empty($steps_array)) return;
+
+    // Criar registro do fluxo no chamado
+    $tf = new self();
+    $tf_id = $tf->add([
+      'tickets_id'                  => $ticket_id,
+      'plugin_escalation_flows_id'  => $flow_id,
+      'status'                      => self::STATUS_PENDING,
+      'current_step'                => 1,
+      'started_at'                  => $_SESSION['glpi_currenttime'],
+    ]);
+    if (!$tf_id) return;
+
+    // Criar registros de ticket_step para todas as etapas (aguardando)
+    foreach ($steps_array as $i => $step_data) {
+      $ts = new PluginEscalationTicketStep();
+      $ts->add([
+        'tickets_id'                      => $ticket_id,
+        'plugin_escalation_ticketflows_id' => $tf_id,
+        'plugin_escalation_steps_id'      => $step_data['id'],
+        'status'                          => ($i === 0)
+          ? PluginEscalationTicketStep::STATUS_PENDING
+          : PluginEscalationTicketStep::STATUS_WAITING,
+        'started_at'                      => ($i === 0) ? $_SESSION['glpi_currenttime'] : null,
+      ]);
+    }
+
+    // Ativar primeira etapa: resolver aprovadores e notificar
+    $first_step_data = $steps_array[0];
+    $first_ts = self::getTicketStepByOrder($tf_id, 1);
+    if ($first_ts) {
+      self::activateStep($first_ts['id'], $ticket, $first_step_data);
+    }
+  }
+
+  /**
+   * Avança para a próxima etapa ou conclui o fluxo como aprovado.
+   * Chamado por PluginEscalationApproval::submitApproval quando uma etapa é aprovada.
+   */
+  static function advanceFlow(int $ticket_flow_id): void {
+    global $DB;
+
+    $tf = new self();
+    if (!$tf->getFromDB($ticket_flow_id) || $tf->fields['status'] !== self::STATUS_PENDING) return;
+
+    $next_step = $tf->fields['current_step'] + 1;
+
+    // Buscar próxima etapa de ticket_step (WAITING → PENDING)
+    $next_ts = self::getTicketStepByOrder($ticket_flow_id, $next_step);
+
+    if (!$next_ts) {
+      // Todas as etapas concluídas: fluxo aprovado
+      self::completeFlow($ticket_flow_id, self::STATUS_APPROVED);
+      return;
+    }
+
+    // Atualizar current_step
+    $tf->update(['id' => $ticket_flow_id, 'current_step' => $next_step]);
+
+    // Ativar próxima etapa
+    $step_def = new PluginEscalationStep();
+    $step_def->getFromDB($next_ts['plugin_escalation_steps_id']);
+    $ticket = new Ticket();
+    $ticket->getFromDB($tf->fields['tickets_id']);
+    self::activateStep($next_ts['id'], $ticket, $step_def->fields);
+  }
+
+  /**
+   * Rejeita o fluxo inteiro.
+   * Chamado por PluginEscalationApproval::submitApproval quando uma etapa é rejeitada.
+   */
+  static function rejectFlow(int $ticket_flow_id): void {
+    self::completeFlow($ticket_flow_id, self::STATUS_REJECTED);
+  }
+
+  static function completeFlow(int $ticket_flow_id, int $final_status): void {
+    global $DB;
+
+    $tf = new self();
+    if (!$tf->getFromDB($ticket_flow_id)) return;
+
+    $tf->update(['id' => $ticket_flow_id, 'status' => $final_status]);
+
+    $ticket = new Ticket();
+    if (!$ticket->getFromDB($tf->fields['tickets_id'])) return;
+
+    $flow = new PluginEscalationFlow();
+    $flow_name = $flow->getFromDB($tf->fields['plugin_escalation_flows_id'])
+      ? $flow->fields['name']
+      : '#' . $tf->fields['plugin_escalation_flows_id'];
+
+    switch ($final_status) {
+      case self::STATUS_APPROVED:
+        $msg = sprintf(__('✅ Fluxo de aprovação "%s" concluído. Chamado aprovado.', 'escalation'), $flow_name);
+        break;
+      case self::STATUS_TIMED_OUT:
+        $msg = sprintf(__('⏰ Fluxo de aprovação "%s" expirou por timeout. Chamado reprovado automaticamente.', 'escalation'), $flow_name);
+        break;
+      default:
+        $msg = sprintf(__('❌ Fluxo de aprovação "%s" concluído. Chamado reprovado.', 'escalation'), $flow_name);
+    }
+
+    $fup = new ITILFollowup();
+    $fup->add(['itemtype' => 'Ticket', 'items_id' => $tf->fields['tickets_id'], 'content' => $msg, 'is_private' => 0]);
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers internos
+  // -------------------------------------------------------------------------
+
+  static function getTicketStepByOrder(int $ticket_flow_id, int $order): ?array {
+    global $DB;
+
+    // Busca o ticket_step correspondente à N-ésima etapa (em step_order)
+    $row = $DB->request([
+      'SELECT' => ['ts.*'],
+      'FROM'   => PluginEscalationTicketStep::getTable() . ' AS ts',
+      'INNER JOIN' => [
+        PluginEscalationStep::getTable() . ' AS s' => [
+          'ON' => ['ts' => 'plugin_escalation_steps_id', 's' => 'id']
+        ]
+      ],
+      'WHERE'   => ['ts.plugin_escalation_ticketflows_id' => $ticket_flow_id, 's.step_order' => $order],
+      'LIMIT'   => 1,
+    ])->current();
+
+    return $row ?: null;
+  }
+
+  static function activateStep(int $ticketstep_id, Ticket $ticket, array $step_data): void {
+    global $DB;
+
+    // Atualizar status do ticket_step para PENDING
+    $DB->update(PluginEscalationTicketStep::getTable(), [
+      'status'     => PluginEscalationTicketStep::STATUS_PENDING,
+      'started_at' => $_SESSION['glpi_currenttime'],
+    ], ['id' => $ticketstep_id]);
+
+    if ($step_data['type'] === PluginEscalationStep::TYPE_HIERARCHY) {
+      // TODO: implementar lógica de hierarquia
+      return;
+    }
+
+    // Tipo PEOPLE: resolver aprovadores e gravar em ticketstepapprovers
+    $approvers = self::resolveApprovers($step_data, $ticket);
+
+    foreach ($approvers as $user_id) {
+      // Verificar se já não está na lista (idempotência)
+      $exists = $DB->request([
+        'FROM'  => 'glpi_plugin_escalation_ticketstepapprovers',
+        'WHERE' => ['plugin_escalation_ticketsteps_id' => $ticketstep_id, 'users_id' => $user_id],
+      ]);
+      if (count($exists) === 0) {
+        $DB->insert('glpi_plugin_escalation_ticketstepapprovers', [
+          'plugin_escalation_ticketsteps_id' => $ticketstep_id,
+          'users_id' => $user_id,
+        ]);
+      }
+    }
+
+    // Notificar via followup
+    if (!empty($approvers)) {
+      $user_names = [];
+      foreach ($approvers as $uid) {
+        $u = new User();
+        if ($u->getFromDB($uid)) $user_names[] = $u->getFriendlyName();
+      }
+      $step_name = $step_data['name'];
+      $content = sprintf(
+        __('🔔 Etapa de aprovação "%s" iniciada. Aprovadores: %s.', 'escalation'),
+        $step_name,
+        implode(', ', $user_names)
+      );
+      $fup = new ITILFollowup();
+      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket->getID(), 'content' => $content, 'is_private' => 1]);
+    }
+  }
+
+  static function resolveApprovers(array $step_data, Ticket $ticket): array {
+    global $DB;
+
+    $user_ids = [];
+
+    // Usuários específicos da definição da etapa
+    $specific = PluginEscalationStepUser::getUsersForStep($step_data['id']);
+    foreach ($specific as $su) {
+      $user_ids[] = (int) $su['users_id'];
+    }
+
+    $ticket_id = $ticket->getID();
+
+    // Solicitantes (type = 1)
+    if (!empty($step_data['include_requesters'])) {
+      foreach (self::getTicketActors($ticket_id, CommonITILActor::REQUESTER) as $uid) {
+        $user_ids[] = $uid;
+      }
+    }
+
+    // Responsáveis (type = 2)
+    if (!empty($step_data['include_assigned'])) {
+      foreach (self::getTicketActors($ticket_id, CommonITILActor::ASSIGN) as $uid) {
+        $user_ids[] = $uid;
+      }
+    }
+
+    // Observadores (type = 3)
+    if (!empty($step_data['include_observers'])) {
+      foreach (self::getTicketActors($ticket_id, CommonITILActor::OBSERVER) as $uid) {
+        $user_ids[] = $uid;
+      }
+    }
+
+    return array_values(array_unique(array_filter($user_ids)));
+  }
+
+  static function getTicketActors(int $ticket_id, int $actor_type): array {
+    global $DB;
+
+    $rows = $DB->request([
+      'SELECT' => ['users_id'],
+      'FROM'   => 'glpi_tickets_users',
+      'WHERE'  => ['tickets_id' => $ticket_id, 'type' => $actor_type, ['users_id' => ['>', 0]]],
+    ]);
+    return array_column(iterator_to_array($rows), 'users_id');
+  }
+
+  // -------------------------------------------------------------------------
+  // UI da aba "Aprovação" no chamado
+  // -------------------------------------------------------------------------
+
+  static function showApprovalTab(Ticket $ticket): void {
+    global $DB;
+
+    $ticket_id = $ticket->getID();
+
+    $flows = $DB->request([
+      'SELECT' => ['tf.*', 'f.name AS flow_name', 'f.timeout_hours AS flow_timeout'],
+      'FROM'   => self::getTable() . ' AS tf',
+      'INNER JOIN' => [
+        PluginEscalationFlow::getTable() . ' AS f' => ['ON' => ['tf' => 'plugin_escalation_flows_id', 'f' => 'id']]
+      ],
+      'WHERE'  => ['tf.tickets_id' => $ticket_id],
+    ]);
+
+    $flows_array = iterator_to_array($flows);
+
+    if (empty($flows_array)) {
+      echo "<p class='center'>" . __('Nenhum fluxo de aprovação ativo para este chamado.', 'escalation') . "</p>";
+      return;
+    }
+
+    foreach ($flows_array as $tf_data) {
+      $tf_id     = $tf_data['id'];
+      $status    = $tf_data['status'];
+      $flow_name = $tf_data['flow_name'];
+
+      echo "<div class='spaced'>";
+      echo "<table class='tab_cadre_fixe'>";
+      echo "<tr class='headerRow'><th colspan='4'>" . htmlspecialchars($flow_name) . " — " . self::getStatusLabel($status) . "</th></tr>";
+
+      // Etapas
+      $steps_data = $DB->request([
+        'SELECT' => ['ts.*', 's.name AS step_name', 's.type', 's.quorum_type', 's.step_order'],
+        'FROM'   => PluginEscalationTicketStep::getTable() . ' AS ts',
+        'INNER JOIN' => [
+          PluginEscalationStep::getTable() . ' AS s' => ['ON' => ['ts' => 'plugin_escalation_steps_id', 's' => 'id']]
+        ],
+        'WHERE'   => ['ts.plugin_escalation_ticketflows_id' => $tf_id],
+        'ORDERBY' => ['s.step_order ASC'],
+      ]);
+
+      $current_user_id = Session::getLoginUserID();
+
+      foreach ($steps_data as $i => $ts) {
+        $ts_status = $ts['status'];
+        echo "<tr class='tab_bg_" . (($i % 2) + 1) . "'>";
+        echo "<td><b>#" . ($i + 1) . " " . htmlspecialchars($ts['step_name']) . "</b></td>";
+        echo "<td>" . PluginEscalationTicketStep::getStatusLabel($ts_status) . "</td>";
+        echo "<td>" . PluginEscalationStep::getTypeName_($ts['type']);
+        if ($ts['type'] === PluginEscalationStep::TYPE_PEOPLE) {
+          echo " / " . PluginEscalationStep::getQuorumName($ts['quorum_type']);
+        }
+        echo "</td>";
+        echo "<td>";
+
+        // Mostrar votações existentes
+        $votes = PluginEscalationApproval::getVotesForStep($ts['id']);
+        foreach ($votes as $v) {
+          $u = new User();
+          $uname = $u->getFromDB($v['users_id']) ? $u->getFriendlyName() : '#' . $v['users_id'];
+          $icon  = $v['action'] == PluginEscalationApproval::ACTION_APPROVE ? '✅' : '❌';
+          echo "<small>$icon " . htmlspecialchars($uname) . "</small><br>";
+        }
+
+        // Formulário de aprovação para o usuário atual (se for aprovador e etapa ativa)
+        if ($ts_status === PluginEscalationTicketStep::STATUS_PENDING
+          && PluginEscalationApproval::isAuthorizedApprover($ts['id'], $current_user_id)
+          && !PluginEscalationApproval::hasUserVoted($ts['id'], $current_user_id)
+        ) {
+          echo "<form method='post' action='" . Plugin::getWebDir('escalation') . "/front/approval.form.php'>";
+          echo "<input type='hidden' name='ticketstep_id' value='" . $ts['id'] . "'>";
+          echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
+          echo "<textarea name='comment' rows='2' style='width:100%;margin:4px 0' placeholder='" . __('Comentário (opcional)', 'escalation') . "'></textarea>";
+          echo "<button name='approve' type='submit' class='vsubmit btn-sm' style='background:#22c55e;border-color:#22c55e;gap:4px'><i class='fas fa-check'></i> " . __('Aprovar', 'escalation') . "</button>&nbsp;";
+          echo "<button name='reject' type='submit' class='vsubmit btn-sm' style='background:#ef4444;border-color:#ef4444;gap:4px'><i class='fas fa-times'></i> " . __('Reprovar', 'escalation') . "</button>";
+          Html::closeForm();
+        }
+
+        echo "</td></tr>";
+      }
+
+      echo "</table></div>";
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // CronTask: verificação de timeouts
+  // -------------------------------------------------------------------------
+
+  /**
+   * Metadados da tarefa expostos na interface de Ações Automáticas do GLPI.
+   */
+  static function cronInfo(string $name): array {
+    switch ($name) {
+      case 'checktimeouts':
+        return ['description' => __('Verifica e expira etapas/fluxos de aprovação que ultrapassaram o timeout configurado.', 'escalation')];
+    }
+    return [];
+  }
+
+  /**
+   * Executa a verificação de timeouts.
+   * Retorno: 1 = processou itens, 0 = nada a fazer, -1 = erro.
+   */
+  static function cronChecktimeouts(CronTask $task): int {
+    global $DB;
+
+    $now     = time();
+    $volume  = 0;
+
+    // ------------------------------------------------------------------
+    // 1. Timeouts de etapas individuais
+    // ------------------------------------------------------------------
+    $step_iterator = $DB->request([
+      'SELECT'     => [
+        'ts.id',
+        'ts.plugin_escalation_ticketflows_id',
+        'ts.started_at',
+        's.timeout_hours',
+        's.name AS step_name',
+      ],
+      'FROM'       => PluginEscalationTicketStep::getTable() . ' AS ts',
+      'INNER JOIN' => [
+        PluginEscalationStep::getTable() . ' AS s' => [
+          'ON' => ['ts' => 'plugin_escalation_steps_id', 's' => 'id'],
+        ],
+      ],
+      'WHERE'      => [
+        'ts.status' => PluginEscalationTicketStep::STATUS_PENDING,
+        ['s.timeout_hours' => ['>', 0]],
+        ['ts.started_at'   => ['!=', null]],
+      ],
+    ]);
+
+    foreach ($step_iterator as $row) {
+      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_hours'] * 3600);
+      if ($expire_at > $now) continue;
+
+      // Marcar etapa como expirada
+      $ts_obj = new PluginEscalationTicketStep();
+      $ts_obj->update([
+        'id'           => $row['id'],
+        'status'       => PluginEscalationTicketStep::STATUS_TIMED_OUT,
+        'completed_at' => date('Y-m-d H:i:s'),
+      ]);
+
+      // Encerrar o fluxo como timed out
+      self::completeFlow((int) $row['plugin_escalation_ticketflows_id'], self::STATUS_TIMED_OUT);
+
+      $task->log(sprintf(
+        __('Etapa "%s" (ID %d) expirou por timeout de %dh.', 'escalation'),
+        $row['step_name'],
+        $row['id'],
+        $row['timeout_hours']
+      ));
+
+      $volume++;
+    }
+
+    // ------------------------------------------------------------------
+    // 2. Timeout global do fluxo (para fluxos ainda pendentes após o passo 1)
+    // ------------------------------------------------------------------
+    $flow_iterator = $DB->request([
+      'SELECT'     => [
+        'tf.id',
+        'tf.started_at',
+        'f.timeout_hours',
+        'f.name AS flow_name',
+      ],
+      'FROM'       => self::getTable() . ' AS tf',
+      'INNER JOIN' => [
+        PluginEscalationFlow::getTable() . ' AS f' => [
+          'ON' => ['tf' => 'plugin_escalation_flows_id', 'f' => 'id'],
+        ],
+      ],
+      'WHERE'      => [
+        'tf.status'       => self::STATUS_PENDING,
+        ['f.timeout_hours' => ['>', 0]],
+        ['tf.started_at'   => ['!=', null]],
+      ],
+    ]);
+
+    foreach ($flow_iterator as $row) {
+      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_hours'] * 3600);
+      if ($expire_at > $now) continue;
+
+      // Marcar etapas WAITING/PENDING como expiradas antes de fechar o fluxo
+      $DB->update(PluginEscalationTicketStep::getTable(), [
+        'status'       => PluginEscalationTicketStep::STATUS_TIMED_OUT,
+        'completed_at' => date('Y-m-d H:i:s'),
+      ], [
+        'plugin_escalation_ticketflows_id' => $row['id'],
+        'status' => [
+          PluginEscalationTicketStep::STATUS_WAITING,
+          PluginEscalationTicketStep::STATUS_PENDING,
+        ],
+      ]);
+
+      self::completeFlow((int) $row['id'], self::STATUS_TIMED_OUT);
+
+      $task->log(sprintf(
+        __('Fluxo "%s" (ID %d) expirou por timeout global de %dh.', 'escalation'),
+        $row['flow_name'],
+        $row['id'],
+        $row['timeout_hours']
+      ));
+
+      $volume++;
+    }
+
+    $task->addVolume($volume);
+    return $volume > 0 ? 1 : 0;
+  }
+
+  static function getStatusLabel(int $status): string {
+    $labels = [
+      self::STATUS_PENDING   => '<span style="color:#d97706">⏳ ' . __('Pendente', 'escalation') . '</span>',
+      self::STATUS_APPROVED  => '<span style="color:#16a34a">✅ ' . __('Aprovado', 'escalation') . '</span>',
+      self::STATUS_REJECTED  => '<span style="color:#dc2626">❌ ' . __('Reprovado', 'escalation') . '</span>',
+      self::STATUS_TIMED_OUT => '<span style="color:#6b7280">⏰ ' . __('Timeout', 'escalation') . '</span>',
+    ];
+    return $labels[$status] ?? $status;
+  }
+}
