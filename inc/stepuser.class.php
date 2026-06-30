@@ -53,35 +53,47 @@ class PluginEscalationStepUser extends CommonDBTM {
   }
 
   static function showForStep(PluginEscalationStep $step, int $flow_id): void {
-    $step_id = $step->getID();
-    $users   = self::getUsersForStep($step_id);
+    $step_id  = $step->getID();
+    $users    = self::getUsersForStep($step_id);
+    $form_url = static::getFormURL();
 
     if (!empty($users)) {
-      echo "<table class='tab_cadre_fixe' style='margin-bottom:8px'>";
+      echo "<table class='table table-sm table-hover mb-3'>";
+      echo "<tbody>";
       foreach ($users as $u) {
         $user = new User();
         $name = $user->getFromDB($u['users_id']) ? $user->getFriendlyName() : '#' . $u['users_id'];
-        echo "<tr class='tab_bg_1'><td>" . htmlspecialchars($name) . "</td><td>";
-        echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
+        echo "<tr>";
+        echo "<td class='align-middle'>" . htmlspecialchars($name) . "</td>";
+        echo "<td class='text-end' style='width:48px'>";
+        echo "<form style='display:inline' action='$form_url' method='post'>";
         echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-        echo "<input type='hidden' name='id' value='" . $u['id'] . "'>";
-        echo "<input type='hidden' name='plugin_escalation_steps_id' value='$step_id'>";
-        echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
-        echo "<button name='purge' type='submit' class='vsubmit btn-sm' style='background:#ef4444;border-color:#ef4444;padding:2px 6px'>";
-        echo "<i class='fas fa-times'></i></button>";
+        echo Html::hidden('id',                              ['value' => $u['id']]);
+        echo Html::hidden('plugin_escalation_steps_id',     ['value' => $step_id]);
+        echo Html::hidden('plugin_escalation_flows_id',     ['value' => $flow_id]);
+        echo "<button name='purge' type='submit' class='btn btn-sm btn-ghost-danger me-1 pe-2' title='" . __('Remover', 'escalation') . "' onclick=\"return confirm('" . __('Remover este usuário?', 'escalation') . "')\">";
+        echo "<i class='ti ti-x'></i></button>";
         Html::closeForm();
         echo "</td></tr>";
       }
-      echo "</table>";
+      echo "</tbody></table>";
     }
 
-    echo "<form style='display:inline-flex;gap:8px;align-items:center' action='" . static::getFormURL() . "' method='post'>";
-    echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-    echo "<input type='hidden' name='plugin_escalation_steps_id' value='$step_id'>";
-    echo "<input type='hidden' name='plugin_escalation_flows_id' value='$flow_id'>";
-    User::dropdown(['name' => 'users_id', 'right' => 'all']);
-    echo "<button name='add' type='submit' class='vsubmit' style='display:inline-flex;gap:6px'>";
-    echo "<i class='fas fa-plus'></i> " . __('Adicionar usuário', 'escalation') . "</button>";
+    // Formulário de adicionar usuário
+    echo "<form class='d-flex align-items-center gap-2' action='$form_url' method='post'>";
+    echo Html::hidden('_glpi_csrf_token',             ['value' => Session::getNewCSRFToken()]);
+    echo Html::hidden('plugin_escalation_steps_id',   ['value' => $step_id]);
+    echo Html::hidden('plugin_escalation_flows_id',   ['value' => $flow_id]);
+    echo "<div class='w-100'>";
+    User::dropdown([
+      'name'                    => 'users_id',
+      'right'                   => 'all',
+      'width'                   => '100%',
+      'minimumResultsForSearch' => 0,
+    ]);
+    echo "</div>";
+    echo "<button name='add' type='submit' class='btn btn-primary'>";
+    echo "<i class='ti ti-plus'></i><span class='d-none d-xxl-block'>" . __('Adicionar usuário', 'escalation') . "</span></button>";
     Html::closeForm();
   }
 }

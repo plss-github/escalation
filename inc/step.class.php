@@ -20,6 +20,10 @@ class PluginEscalationStep extends CommonDBTM {
     return _n('Etapa', 'Etapas', $nb, 'escalation');
   }
 
+  static function getIcon() {
+    return 'ti ti-list-check';
+  }
+
   static function installBaseData(Migration $migration, $version) {
     global $DB;
 
@@ -140,8 +144,8 @@ class PluginEscalationStep extends CommonDBTM {
 
       // Botão sempre visível
       echo "<td>";
-      echo "<button type='submit' name='add' class='btn btn-primary btn-sm'>";
-      echo "<i class='fas fa-plus'></i>&nbsp;" . _sx('button', 'Add') . "</button>";
+      echo "<button type='submit' name='add' class='btn btn-primary btn-sm me-1 pe-2'>";
+      echo "<i class='ti ti-plus'></i><span class='d-none d-xxl-block'>" . _sx('button', 'Add') . "</span></button>";
       echo "</td>";
       echo "</tr></table>";
 
@@ -164,7 +168,7 @@ class PluginEscalationStep extends CommonDBTM {
       'ORDERBY' => ['step_order ASC'],
     ]);
 
-    $steps_array = iterator_to_array($steps);
+    $steps_array = array_values(iterator_to_array($steps));
     if (empty($steps_array)) {
       echo "<p class='center'>" . __('Nenhuma etapa configurada.', 'escalation') . "</p>";
       return true;
@@ -200,33 +204,37 @@ class PluginEscalationStep extends CommonDBTM {
       if ($canedit) {
         echo "<td class='nowrap'>";
 
-        // Mover para cima
+        // Mover para cima — sempre renderizado para manter alinhamento
         if ($i > 0) {
           echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
           echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
           echo Html::hidden('id', ['value' => $step['id']]);
           echo Html::hidden('plugin_escalation_flows_id', ['value' => $flow_id]);
-          echo "<button name='move_up' type='submit' class='btn btn-sm btn-icon btn-ghost-secondary' title='" . __('Mover para cima', 'escalation') . "'><i class='fas fa-arrow-up'></i></button>";
+          echo "<button name='move_up' type='submit' class='btn btn-sm btn-ghost-secondary me-1 pe-2' title='" . __('Mover para cima', 'escalation') . "'><i class='ti ti-arrow-up'></i></button>";
           Html::closeForm();
+        } else {
+          echo "<button class='btn btn-sm me-1 pe-2' style='visibility:hidden' disabled><i class='ti ti-arrow-up'></i></button>";
         }
 
-        // Mover para baixo
+        // Mover para baixo — sempre renderizado para manter alinhamento
         if ($i < $total - 1) {
           echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
           echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
           echo Html::hidden('id', ['value' => $step['id']]);
           echo Html::hidden('plugin_escalation_flows_id', ['value' => $flow_id]);
-          echo "<button name='move_down' type='submit' class='btn btn-sm btn-icon btn-ghost-secondary' title='" . __('Mover para baixo', 'escalation') . "'><i class='fas fa-arrow-down'></i></button>";
+          echo "<button name='move_down' type='submit' class='btn btn-sm btn-ghost-secondary me-1 pe-2' title='" . __('Mover para baixo', 'escalation') . "'><i class='ti ti-arrow-down'></i></button>";
           Html::closeForm();
+        } else {
+          echo "<button class='btn btn-sm me-1 pe-2' style='visibility:hidden' disabled><i class='ti ti-arrow-down'></i></button>";
         }
 
-        echo " <a href='" . static::getFormURL() . "?id=" . $step['id'] . "' class='btn btn-sm btn-icon btn-ghost-info' title='" . __('Editar', 'escalation') . "'><i class='fas fa-pencil-alt'></i></a>";
+        echo "<a href='" . static::getFormURL() . "?id=" . $step['id'] . "' class='btn btn-sm btn-ghost-info me-1 pe-2' title='" . __('Editar', 'escalation') . "'><i class='ti ti-pencil'></i></a>";
 
         echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
         echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
         echo Html::hidden('id', ['value' => $step['id']]);
-        echo "<button name='purge' type='submit' class='btn btn-sm btn-icon btn-ghost-danger' title='" . __('Excluir', 'escalation') . "' onclick=\"return confirm('" . __('Excluir esta etapa?', 'escalation') . "')\">";
-        echo "<i class='fas fa-trash-alt'></i></button>";
+        echo "<button name='purge' type='submit' class='btn btn-sm btn-ghost-danger pe-2' title='" . __('Excluir', 'escalation') . "' onclick=\"return confirm('" . __('Excluir esta etapa?', 'escalation') . "')\">";
+        echo "<i class='ti ti-trash'></i></button>";
         Html::closeForm();
 
         echo "</td>";
@@ -238,25 +246,26 @@ class PluginEscalationStep extends CommonDBTM {
   }
 
   function showForm($ID, array $options = []) {
-    $step = new self();
-    if ($ID > 0) {
-      $step->getFromDB($ID);
-    } else {
-      $step->getEmpty();
+    // Carrega dados em $this se ainda não foram (suporte a display() e chamada direta)
+    if ($ID > 0 && empty($this->fields['id'])) {
+      $this->getFromDB($ID);
+    } elseif ($ID <= 0 && empty($this->fields)) {
+      $this->getEmpty();
     }
-    $flow_id     = $step->fields['plugin_escalation_flows_id'] ?? ($_GET['plugin_escalation_flows_id'] ?? 0);
-    $current_type = $step->fields['type'] ?? self::TYPE_PEOPLE;
+
+    $flow_id      = $this->fields['plugin_escalation_flows_id'] ?? ($_GET['plugin_escalation_flows_id'] ?? 0);
+    $current_type = $this->fields['type'] ?? self::TYPE_PEOPLE;
     $is_hier      = ($current_type === self::TYPE_HIERARCHY);
 
-    $step->initForm($ID, $options);
-    $step->showFormHeader($options);
+    $this->initForm($ID, $options);
+    $this->showFormHeader($options);
 
     echo Html::hidden('plugin_escalation_flows_id', ['value' => $flow_id]);
 
     // Linha 1: Nome + Tipo
     echo "<tr class='tab_bg_1'>";
     echo "<td>" . __('Nome', 'escalation') . "</td>";
-    echo "<td>" . Html::input('name', ['value' => $step->fields['name'] ?? '']) . "</td>";
+    echo "<td>" . Html::input('name', ['value' => $this->fields['name'] ?? '']) . "</td>";
     echo "<td>" . __('Tipo', 'escalation') . "</td>";
     echo "<td>";
     Dropdown::showFromArray('type', self::getTypeOptions(), [
@@ -271,7 +280,7 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<td>" . __('Reprovação automática (dias)', 'escalation') . "</td>";
     echo "<td>";
     echo Html::input('timeout_days', [
-      'value' => (int)($step->fields['timeout_days'] ?? 0),
+      'value' => (int)($this->fields['timeout_days'] ?? 0),
       'type'  => 'number',
       'min'   => '0',
       'style' => 'width:80px',
@@ -286,16 +295,16 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<td>" . __('Nível necessário', 'escalation') . "</td>";
     echo "<td>";
     echo Html::input('hierarchy_level', [
-      'value' => (int)($step->fields['hierarchy_level'] ?? 1),
+      'value' => (int)($this->fields['hierarchy_level'] ?? 1),
       'type'  => 'number',
       'min'   => '1',
       'style' => 'width:80px',
     ]);
     echo "&nbsp;<span class='text-muted small'>" . __('1 = nível mais alto', 'escalation') . "</span>";
     echo "</td>";
-    echo "<td colspan='2'>";
-    echo "<span class='text-muted'>" . __('O sistema percorre a cadeia de supervisores até encontrar alguém com nível ≤ ao necessário.', 'escalation') . "</span>";
-    echo "</td>";
+    echo "<td colspan='2'><span class='text-muted'>" .
+      __('O sistema percorre a cadeia de supervisores até encontrar alguém com nível ≤ ao necessário.', 'escalation') .
+      "</span></td>";
     echo "</tr>";
 
     // Linha 4: Quórum + Fontes (visível apenas para Pessoas)
@@ -303,14 +312,25 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<td>" . __('Quórum', 'escalation') . "</td>";
     echo "<td>";
     Dropdown::showFromArray('quorum_type', self::getQuorumOptions(), [
-      'value' => $step->fields['quorum_type'] ?? self::QUORUM_MIN1,
+      'value' => $this->fields['quorum_type'] ?? self::QUORUM_MIN1,
     ]);
     echo "</td>";
     echo "<td>" . __('Fontes de aprovadores', 'escalation') . "</td>";
     echo "<td>";
-    echo "<label class='me-3'><input type='checkbox' name='include_requesters' value='1'" . (!empty($step->fields['include_requesters']) ? ' checked' : '') . ">&nbsp;" . __('Solicitantes', 'escalation') . "</label>";
-    echo "<label class='me-3'><input type='checkbox' name='include_assigned'   value='1'" . (!empty($step->fields['include_assigned'])   ? ' checked' : '') . ">&nbsp;" . __('Responsáveis', 'escalation') . "</label>";
-    echo "<label><input type='checkbox' name='include_observers'               value='1'" . (!empty($step->fields['include_observers'])  ? ' checked' : '') . ">&nbsp;" . __('Observadores', 'escalation') . "</label>";
+    $current_sources = [];
+    if (!empty($this->fields['include_requesters'])) $current_sources[] = 'requesters';
+    if (!empty($this->fields['include_assigned']))   $current_sources[] = 'assigned';
+    if (!empty($this->fields['include_observers']))  $current_sources[] = 'observers';
+    Dropdown::showFromArray('sources', [
+      'requesters' => __('Solicitantes', 'escalation'),
+      'assigned'   => __('Responsáveis', 'escalation'),
+      'observers'  => __('Observadores', 'escalation'),
+    ], [
+      'values'              => $current_sources,
+      'multiple'            => true,
+      'display_emptychoice' => false,
+      'width'               => '80%',
+    ]);
     echo "</td>";
     echo "</tr>";
 
@@ -326,18 +346,21 @@ class PluginEscalationStep extends CommonDBTM {
       }
     </script>";
 
-    $step->showFormButtons($options);
+    $this->showFormButtons($options);
 
-    // Seção de usuários — fora do <form> principal para evitar forms aninhados
+    // Seção de usuários — fora do <form> principal para evitar forms aninhados.
+    // Bootstrap card para consistência visual com GLPI 10.
     if ($ID > 0) {
-      $users_style = $is_hier ? "style='display:none'" : '';
-      echo "<div id='escalation_users_section' class='spaced' $users_style>";
-      echo "<table class='tab_cadre_fixe'>";
-      echo "<tr class='headerRow'><th colspan='2'>" . __('Usuários específicos', 'escalation') . "</th></tr>";
-      echo "<tr class='tab_bg_1'><td colspan='2'>";
-      PluginEscalationStepUser::showForStep($step, $flow_id);
-      echo "</td></tr>";
-      echo "</table>";
+      $users_style = $is_hier ? 'display:none' : '';
+      echo "<hr class='mt-0 mb-4'>";
+      echo "<div id='escalation_users_section' class='card' style='$users_style'>";
+      echo "  <div class='card-header d-flex align-items-center py-2 ps-3'>";
+      echo "    <i class='ti ti-users me-2 text-muted'></i>";
+      echo "    <span class='fw-bold'>" . __('Usuários específicos', 'escalation') . "</span>";
+      echo "  </div>";
+      echo "  <div class='card-body p-3'>";
+      PluginEscalationStepUser::showForStep($this, $flow_id);
+      echo "  </div>";
       echo "</div>";
     }
 

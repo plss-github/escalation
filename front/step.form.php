@@ -23,9 +23,9 @@ if (isset($_POST['add'])) {
     'timeout_days'               => (int) ($_POST['timeout_days'] ?? 0),
     'hierarchy_level'            => (int) ($_POST['hierarchy_level'] ?? 0),
     'quorum_type'                => $_POST['quorum_type'] ?? PluginEscalationStep::QUORUM_MIN1,
-    'include_requesters'         => !empty($_POST['include_requesters']) ? 1 : 0,
-    'include_assigned'           => !empty($_POST['include_assigned']) ? 1 : 0,
-    'include_observers'          => !empty($_POST['include_observers']) ? 1 : 0,
+    'include_requesters'         => in_array('requesters', (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_assigned'           => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_observers'          => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
   ];
 
   if ($new_id = $step->add($input)) {
@@ -44,9 +44,9 @@ if (isset($_POST['update'])) {
     'timeout_days'       => (int) ($_POST['timeout_days'] ?? 0),
     'hierarchy_level'    => (int) ($_POST['hierarchy_level'] ?? 0),
     'quorum_type'        => $_POST['quorum_type'] ?? PluginEscalationStep::QUORUM_MIN1,
-    'include_requesters' => !empty($_POST['include_requesters']) ? 1 : 0,
-    'include_assigned'   => !empty($_POST['include_assigned']) ? 1 : 0,
-    'include_observers'  => !empty($_POST['include_observers']) ? 1 : 0,
+    'include_requesters' => in_array('requesters', (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_assigned'   => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_observers'  => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
   ]);
   Html::back();
 }
@@ -80,5 +80,5 @@ if (isset($_POST['move_down'])) {
 
 // ---- Exibir formulário de edição -------------------------------------------
 Html::header(PluginEscalationStep::getTypeName(1), $_SERVER['PHP_SELF'], "config", "pluginescalationflow");
-(new PluginEscalationStep())->showForm($step_id, ['withtemplate' => 0]);
+$step->display(['id' => $step_id]);
 Html::footer();

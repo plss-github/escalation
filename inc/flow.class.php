@@ -12,7 +12,7 @@ class PluginEscalationFlow extends CommonDBTM {
   }
 
   static function getIcon() {
-    return 'fas fa-sitemap';
+    return 'ti ti-sitemap';
   }
 
   static function installBaseData(Migration $migration, $version) {
@@ -128,7 +128,7 @@ class PluginEscalationFlow extends CommonDBTM {
 
   public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0) {
     if ($item->getType() === static::class && !$item->isNewItem()) {
-      return [1 => __('Etapas', 'escalation')];
+      return [1 => CommonGLPI::createTabEntry(__('Etapas', 'escalation'), 0, static::class, 'ti ti-list')];
     }
     return '';
   }

@@ -11,12 +11,12 @@ class PluginEscalationConfig extends CommonGLPI {
   }
 
   static function getIcon() {
-    return 'fas fa-shield-alt';
+    return 'ti ti-sitemap';
   }
 
   public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0) {
     if ($item instanceof Config) {
-      return self::getTypeName(1);
+      return CommonGLPI::createTabEntry(self::getTypeName(1), 0, null, self::getIcon());
     }
     return '';
   }
@@ -96,7 +96,8 @@ class PluginEscalationConfig extends CommonGLPI {
     echo "</tr>";
 
     echo "<tr class='tab_bg_2'><td colspan='4' class='center'>";
-    echo "<input type='submit' name='update' class='btn btn-primary' value='" . _sx('button', 'Save') . "'>";
+    echo "<button type='submit' name='update' class='btn btn-primary' title='" . _sx('button', 'Save') . "'>";
+    echo "<i class='ti ti-device-floppy'></i><span class='d-none d-xxl-block'>" . _sx('button', 'Save') . "</span></button>";
     echo "</td></tr>";
     echo "</table>";
     Html::closeForm();
@@ -104,7 +105,7 @@ class PluginEscalationConfig extends CommonGLPI {
     // ------------------------------------------------------------------
     // Seção 2 — Mapeamento de níveis (formulários separados por ação)
     // ------------------------------------------------------------------
-    echo "<br>";
+    echo "<hr class='my-4'>";
     echo "<table class='tab_cadre_fixe'>";
     echo "<tr class='tab_bg_1'>";
     echo "<th>" . __('Nível', 'escalation') . "</th>";
@@ -130,7 +131,7 @@ class PluginEscalationConfig extends CommonGLPI {
         echo Html::hidden('level_id', ['value' => $l['id']]);
         echo "<button type='submit' class='vsubmit btn-sm' style='background:#ef4444;border-color:#ef4444;padding:2px 8px' "
           . "onclick=\"return confirm('" . __('Remover este nível?', 'escalation') . "')\">"
-          . "<i class='fas fa-trash-alt'></i></button>";
+          . "<i class='ti ti-trash'></i></button>";
         Html::closeForm();
         echo "</td></tr>";
       }
@@ -161,8 +162,8 @@ class PluginEscalationConfig extends CommonGLPI {
     Dropdown::show($hier_type, ['name' => 'new_items_id', 'value' => 0]);
     echo "</td>";
     echo "<td>";
-    echo "<button type='submit' class='vsubmit' style='padding:4px 12px'>"
-      . "<i class='fas fa-plus'></i> " . _sx('button', 'Add') . "</button>";
+    echo "<button type='submit' class='btn btn-primary'>"
+      . "<i class='ti ti-plus'></i><span class='d-none d-xxl-block'>" . _sx('button', 'Add') . "</span></button>";
     echo "</td>";
     echo "</tr></table>";
     Html::closeForm();
