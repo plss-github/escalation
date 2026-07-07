@@ -17,6 +17,8 @@ class PluginEscalationApproval extends CommonDBTM {
     return _n('Aprovação', 'Aprovações', $nb, 'escalation');
   }
 
+  static function getIcon() { return 'ti ti-check'; }
+
   static function installBaseData(Migration $migration, $version) {
     global $DB;
 

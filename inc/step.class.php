@@ -7,11 +7,11 @@ if (!defined('GLPI_ROOT')) {
 class PluginEscalationStep extends CommonDBTM {
   static $rightname = 'config';
 
-  // Tipos de etapa
   const TYPE_PEOPLE    = 'people';
   const TYPE_HIERARCHY = 'hierarchy';
+  // Mantido apenas para migração de dados legados
+  const TYPE_AUTO = 'auto';
 
-  // Tipos de quórum (apenas para TYPE_PEOPLE)
   const QUORUM_MIN1     = 'min1';
   const QUORUM_MAJORITY = 'majority';
   const QUORUM_ALL      = 'all';
@@ -40,22 +40,41 @@ class PluginEscalationStep extends CommonDBTM {
         `step_order` int NOT NULL DEFAULT '0',
         `timeout_days` int NOT NULL DEFAULT '0',
         `quorum_type` varchar(32) COLLATE {$default_collation} NOT NULL DEFAULT '" . self::QUORUM_MIN1 . "',
-        `hierarchy_level` int NOT NULL DEFAULT '0',
+        `hierarchy_level` int NOT NULL DEFAULT '1',
+        `auto_hierarchy_dynamic` tinyint(1) NOT NULL DEFAULT '0',
+        `generate_immediately` tinyint(1) NOT NULL DEFAULT '1',
         `include_requesters` tinyint(1) NOT NULL DEFAULT '0',
         `include_assigned` tinyint(1) NOT NULL DEFAULT '0',
         `include_observers` tinyint(1) NOT NULL DEFAULT '0',
+        `plugin_escalation_templates_id` int {$default_key_sign} NOT NULL DEFAULT '0',
         PRIMARY KEY (`id`),
         KEY `plugin_escalation_flows_id` (`plugin_escalation_flows_id`),
         KEY `step_order` (`step_order`)
       ) ENGINE=InnoDB DEFAULT CHARSET={$default_charset} COLLATE={$default_collation};");
     } else {
+      // Migrações incrementais
       if ($DB->fieldExists(self::getTable(), 'timeout_hours') && !$DB->fieldExists(self::getTable(), 'timeout_days')) {
         $DB->doQuery("ALTER TABLE `" . self::getTable() . "` CHANGE `timeout_hours` `timeout_days` int NOT NULL DEFAULT '0'");
       } elseif (!$DB->fieldExists(self::getTable(), 'timeout_days')) {
         $migration->addField(self::getTable(), 'timeout_days', "int NOT NULL DEFAULT '0'");
       }
-      if (!$DB->fieldExists(self::getTable(), 'hierarchy_level')) {
-        $migration->addField(self::getTable(), 'hierarchy_level', "int NOT NULL DEFAULT '0'");
+      foreach (['hierarchy_level' => "int NOT NULL DEFAULT '1'",
+                'auto_hierarchy_dynamic' => "tinyint(1) NOT NULL DEFAULT '0'",
+                'plugin_escalation_templates_id' => "int NOT NULL DEFAULT '0'"] as $col => $def) {
+        if (!$DB->fieldExists(self::getTable(), $col)) {
+          $migration->addField(self::getTable(), $col, $def);
+        }
+      }
+      if (!$DB->fieldExists(self::getTable(), 'generate_immediately')) {
+        // Adiciona coluna — executa imediatamente para poder migrar os dados a seguir
+        $DB->doQuery("ALTER TABLE `" . self::getTable() . "` ADD COLUMN `generate_immediately` tinyint(1) NOT NULL DEFAULT '1'");
+        // Converte etapas legadas TYPE_AUTO para HIERARCHY + generate_immediately=1
+        if ($DB->fieldExists(self::getTable(), 'auto_mode')) {
+          $DB->update(self::getTable(), ['type' => self::TYPE_HIERARCHY, 'generate_immediately' => 1, 'auto_hierarchy_dynamic' => 1],
+            ['type' => 'auto', 'auto_mode' => 'hierarchy']);
+          $DB->update(self::getTable(), ['type' => self::TYPE_PEOPLE, 'generate_immediately' => 1],
+            ['type' => 'auto']);
+        }
       }
     }
   }
@@ -110,39 +129,54 @@ class PluginEscalationStep extends CommonDBTM {
     if (!$flow->can($flow_id, READ)) return false;
     $canedit = $flow->can($flow_id, UPDATE);
 
-    // Formulário para adicionar etapa
     if ($canedit) {
       echo "<form action='" . static::getFormURL() . "' method='post'>";
       echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
       echo Html::hidden('plugin_escalation_flows_id', ['value' => $flow_id]);
       echo "<table class='tab_cadre_fixe'>";
-      echo "<tr class='tab_bg_1'><th colspan='9'>" . __('Adicionar Etapa', 'escalation') . "</th></tr>";
+      echo "<tr class='tab_bg_1'><th colspan='12'>" . __('Adicionar Etapa', 'escalation') . "</th></tr>";
       echo "<tr class='tab_bg_2'>";
 
+      // Nome
       echo "<td>" . __('Nome', 'escalation') . "</td>";
-      echo "<td>" . Html::input('name', ['style' => 'width:160px']) . "</td>";
+      echo "<td>" . Html::input('name', ['style' => 'width:140px']) . "</td>";
 
+      // Tipo
       echo "<td>" . __('Tipo', 'escalation') . "</td>";
       echo "<td>";
-      $type_options = self::getTypeOptions();
-      Dropdown::showFromArray('type', $type_options, [
+      Dropdown::showFromArray('type', self::getTypeOptions(), [
         'value'     => self::TYPE_PEOPLE,
-        'on_change' => "escalationToggleInlineFields(this.value)",
+        'on_change' => "escalationInlineToggle(this.value)",
       ]);
       echo "</td>";
 
-      echo "<td>" . __('Reprovação automática (dias)', 'escalation') . "</td>";
-      echo "<td>";
-      echo Html::input('timeout_days', ['value' => '0', 'type' => 'number', 'min' => '0', 'style' => 'width:60px']);
+      // Reprovação
+      echo "<td>" . __('Prazo (dias)', 'escalation') . "</td>";
+      echo "<td>" . Html::input('timeout_days', ['value' => '0', 'type' => 'number', 'min' => '0', 'style' => 'width:80px']) . "</td>";
+
+      // Hierarquia: nível + dinâmico (ocultos por padrão — tipo padrão é Pessoas)
+      echo "<td id='il_hier_lbl' style='display:none'>" . __('Nível', 'escalation') . "</td>";
+      $rand_dyn_il = 'il_dyn_' . mt_rand();
+      echo "<td id='il_hier_fld' style='display:none'>";
+      echo "<div class='d-flex align-items-center gap-2'>";
+      echo Html::input('hierarchy_level', ['value' => '1', 'type' => 'number', 'min' => '1', 'style' => 'width:60px;flex-shrink:0']);
+      echo "<div class='form-check mb-0'>";
+      echo Html::getCheckbox([
+        'name'          => 'auto_hierarchy_dynamic',
+        'id'            => $rand_dyn_il,
+        'value'         => '1',
+        'zero_on_empty' => false,
+        'specific_tags' => ['onchange' => "var n=document.querySelector('#il_hier_fld input[type=number]');if(n)n.style.opacity=this.checked?'0.3':'1'"],
+      ]);
+      echo "<label for='$rand_dyn_il' class='form-check-label'>" . __('Dinâmico', 'escalation') . "</label>";
+      echo "</div>";
+      echo "</div>";
       echo "</td>";
 
-      // Células de hierarquia: começam ocultas (tipo padrão é Pessoas)
-      echo "<td id='inline_hier_label' style='display:none'>" . __('Nível necessário', 'escalation') . "</td>";
-      echo "<td id='inline_hier_field' style='display:none'>";
-      echo Html::input('hierarchy_level', ['value' => '1', 'type' => 'number', 'min' => '1', 'style' => 'width:60px']);
-      echo "</td>";
+      // generate_immediately oculto com default 1
+      echo Html::hidden('generate_immediately', ['value' => '1']);
 
-      // Botão sempre visível
+      // Botão
       echo "<td>";
       echo "<button type='submit' name='add' class='btn btn-primary btn-sm me-1 pe-2'>";
       echo "<i class='ti ti-plus'></i><span class='d-none d-xxl-block'>" . _sx('button', 'Add') . "</span></button>";
@@ -150,11 +184,11 @@ class PluginEscalationStep extends CommonDBTM {
       echo "</tr></table>";
 
       echo "<script>
-        function escalationToggleInlineFields(type) {
-          var show = (type === '" . self::TYPE_HIERARCHY . "');
-          ['inline_hier_label','inline_hier_field'].forEach(function(id){
+        function escalationInlineToggle(type) {
+          var isHier = (type === 'hierarchy');
+          ['il_hier_lbl','il_hier_fld'].forEach(function(id){
             var el = document.getElementById(id);
-            if (el) el.style.display = show ? '' : 'none';
+            if (el) el.style.display = isHier ? '' : 'none';
           });
         }
       </script>";
@@ -180,8 +214,9 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<th>#</th>";
     echo "<th>" . __('Nome', 'escalation') . "</th>";
     echo "<th>" . __('Tipo', 'escalation') . "</th>";
+    echo "<th>" . __('Gerar', 'escalation') . "</th>";
     echo "<th>" . __('Quórum', 'escalation') . "</th>";
-    echo "<th>" . __('Reprovação automática', 'escalation') . "</th>";
+    echo "<th>" . __('Prazo', 'escalation') . "</th>";
     echo "<th>" . __('Nível hierárquico', 'escalation') . "</th>";
     echo "<th>" . __('Fontes', 'escalation') . "</th>";
     if ($canedit) echo "<th>" . __('Ações', 'escalation') . "</th>";
@@ -194,46 +229,58 @@ class PluginEscalationStep extends CommonDBTM {
       echo "<td>" . ($i + 1) . "</td>";
       echo "<td><a href='" . static::getFormURL() . "?id=" . $step['id'] . "'>" . htmlspecialchars($step['name']) . "</a></td>";
       echo "<td>" . self::getTypeName_($step['type']) . "</td>";
+      echo "<td>" . (!empty($step['generate_immediately'])
+        ? "<span class='badge bg-success-lt'>" . __('Imediato', 'escalation') . "</span>"
+        : "<span class='badge bg-secondary-lt'>" . __('Após solução', 'escalation') . "</span>")
+        . "</td>";
       echo "<td>" . ($step['type'] === self::TYPE_PEOPLE ? self::getQuorumName($step['quorum_type']) : '—') . "</td>";
       echo "<td>" . ($step['timeout_days'] > 0 ? $step['timeout_days'] . 'd' : '—') . "</td>";
-      echo "<td>" . ($step['type'] === self::TYPE_HIERARCHY && $step['hierarchy_level'] > 0
-        ? sprintf(__('Nível %d', 'escalation'), $step['hierarchy_level'])
-        : '—') . "</td>";
+      echo "<td>";
+      if ($step['type'] === self::TYPE_HIERARCHY) {
+        if (!empty($step['auto_hierarchy_dynamic'])) {
+          echo __('Dinâmico (nível do solicitante - 1)', 'escalation');
+        } elseif ($step['hierarchy_level'] > 0) {
+          echo sprintf(__('Nível %d', 'escalation'), $step['hierarchy_level']);
+        } else {
+          echo '—';
+        }
+      } else {
+        echo '—';
+      }
+      echo "</td>";
       echo "<td>" . htmlspecialchars($sources) . "</td>";
 
       if ($canedit) {
         echo "<td class='nowrap'>";
 
-        // Mover para cima — sempre renderizado para manter alinhamento
         if ($i > 0) {
           echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
           echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
           echo Html::hidden('id', ['value' => $step['id']]);
           echo Html::hidden('plugin_escalation_flows_id', ['value' => $flow_id]);
-          echo "<button name='move_up' type='submit' class='btn btn-sm btn-ghost-secondary me-1 pe-2' title='" . __('Mover para cima', 'escalation') . "'><i class='ti ti-arrow-up'></i></button>";
+          echo "<button name='move_up' type='submit' class='btn btn-sm btn-ghost-secondary me-1 pe-2'><i class='ti ti-arrow-up'></i></button>";
           Html::closeForm();
         } else {
           echo "<button class='btn btn-sm me-1 pe-2' style='visibility:hidden' disabled><i class='ti ti-arrow-up'></i></button>";
         }
 
-        // Mover para baixo — sempre renderizado para manter alinhamento
         if ($i < $total - 1) {
           echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
           echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
           echo Html::hidden('id', ['value' => $step['id']]);
           echo Html::hidden('plugin_escalation_flows_id', ['value' => $flow_id]);
-          echo "<button name='move_down' type='submit' class='btn btn-sm btn-ghost-secondary me-1 pe-2' title='" . __('Mover para baixo', 'escalation') . "'><i class='ti ti-arrow-down'></i></button>";
+          echo "<button name='move_down' type='submit' class='btn btn-sm btn-ghost-secondary me-1 pe-2'><i class='ti ti-arrow-down'></i></button>";
           Html::closeForm();
         } else {
           echo "<button class='btn btn-sm me-1 pe-2' style='visibility:hidden' disabled><i class='ti ti-arrow-down'></i></button>";
         }
 
-        echo "<a href='" . static::getFormURL() . "?id=" . $step['id'] . "' class='btn btn-sm btn-ghost-info me-1 pe-2' title='" . __('Editar', 'escalation') . "'><i class='ti ti-pencil'></i></a>";
+        echo "<a href='" . static::getFormURL() . "?id=" . $step['id'] . "' class='btn btn-sm btn-ghost-info me-1 pe-2'><i class='ti ti-pencil'></i></a>";
 
         echo "<form style='display:inline' action='" . static::getFormURL() . "' method='post'>";
         echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
         echo Html::hidden('id', ['value' => $step['id']]);
-        echo "<button name='purge' type='submit' class='btn btn-sm btn-ghost-danger pe-2' title='" . __('Excluir', 'escalation') . "' onclick=\"return confirm('" . __('Excluir esta etapa?', 'escalation') . "')\">";
+        echo "<button name='purge' type='submit' class='btn btn-sm btn-ghost-danger pe-2' onclick=\"return confirm('" . __('Excluir esta etapa?', 'escalation') . "')\">";
         echo "<i class='ti ti-trash'></i></button>";
         Html::closeForm();
 
@@ -246,7 +293,6 @@ class PluginEscalationStep extends CommonDBTM {
   }
 
   function showForm($ID, array $options = []) {
-    // Carrega dados em $this se ainda não foram (suporte a display() e chamada direta)
     if ($ID > 0 && empty($this->fields['id'])) {
       $this->getFromDB($ID);
     } elseif ($ID <= 0 && empty($this->fields)) {
@@ -255,7 +301,11 @@ class PluginEscalationStep extends CommonDBTM {
 
     $flow_id      = $this->fields['plugin_escalation_flows_id'] ?? ($_GET['plugin_escalation_flows_id'] ?? 0);
     $current_type = $this->fields['type'] ?? self::TYPE_PEOPLE;
+    // Legado: se ainda vier como 'auto', trata como people até ser salvo
+    if ($current_type === self::TYPE_AUTO) $current_type = self::TYPE_PEOPLE;
     $is_hier      = ($current_type === self::TYPE_HIERARCHY);
+    $is_dyn       = !empty($this->fields['auto_hierarchy_dynamic']);
+    $gen_immed    = !isset($this->fields['generate_immediately']) || !empty($this->fields['generate_immediately']);
 
     $this->initForm($ID, $options);
     $this->showFormHeader($options);
@@ -275,8 +325,23 @@ class PluginEscalationStep extends CommonDBTM {
     echo "</td>";
     echo "</tr>";
 
-    // Linha 2: Reprovação automática
+    // Linha 2: Gerar imediatamente + Reprovação automática
+    $rand_gi = 'gen_immed_' . mt_rand();
     echo "<tr class='tab_bg_2'>";
+    echo "<td>" . __('Gerar imediatamente?', 'escalation') . "</td>";
+    echo "<td>";
+    echo "<div class='form-check'>";
+    echo Html::getCheckbox([
+      'name'          => 'generate_immediately',
+      'id'            => $rand_gi,
+      'value'         => '1',
+      'checked'       => $gen_immed,
+      'zero_on_empty' => true,
+    ]);
+    echo "<label for='$rand_gi' class='form-check-label'>"
+       . __('Gera a aprovação assim que possível.', 'escalation') . "</label>";
+    echo "</div>";
+    echo "</td>";
     echo "<td>" . __('Reprovação automática (dias)', 'escalation') . "</td>";
     echo "<td>";
     echo Html::input('timeout_days', [
@@ -285,30 +350,55 @@ class PluginEscalationStep extends CommonDBTM {
       'min'   => '0',
       'style' => 'width:80px',
     ]);
-    echo "&nbsp;<span class='text-muted small'>" . __('0 = desativado', 'escalation') . "</span>";
+    echo "<div class='text-muted small mt-1'>" . __('0 = desativado', 'escalation') . "</div>";
     echo "</td>";
-    echo "<td colspan='2'></td>";
     echo "</tr>";
 
-    // Linha 3: Nível hierárquico (visível apenas para Hierarquia)
-    echo "<tr class='tab_bg_1' id='escalation_hier_row'" . ($is_hier ? '' : " style='display:none'") . ">";
-    echo "<td>" . __('Nível necessário', 'escalation') . "</td>";
+    // Linha 3: Template (para todos os tipos)
+    echo "<tr class='tab_bg_1'>";
+    echo "<td>" . __('Modelo de validação', 'escalation') . "</td>";
+    echo "<td colspan='3'>";
+    Dropdown::show('PluginEscalationTemplate', [
+      'name'                => 'plugin_escalation_templates_id',
+      'value'               => $this->fields['plugin_escalation_templates_id'] ?? 0,
+      'display_emptychoice' => true,
+      'width'               => '300px',
+    ]);
+    echo "</td>";
+    echo "</tr>";
+
+    // Linha 4: Configurações de Hierarquia (visível apenas para tipo HIERARQUIA)
+    $rand_dyn = 'hier_dyn_' . mt_rand();
+    echo "<tr class='tab_bg_2' id='escalation_hier_row'" . ($is_hier ? '' : " style='display:none'") . ">";
+    echo "<td>" . __('Hierarquia dinâmica?', 'escalation') . "</td>";
     echo "<td>";
+    echo "<div class='form-check'>";
+    echo Html::getCheckbox([
+      'name'          => 'auto_hierarchy_dynamic',
+      'id'            => $rand_dyn,
+      'value'         => '1',
+      'checked'       => $is_dyn,
+      'zero_on_empty' => true,
+      'onclick'       => 'escalationToggleHierDynamic(this.checked)',
+    ]);
+    echo "<label for='$rand_dyn' class='form-check-label'>"
+       . __('Usa nível do solicitante - 1.', 'escalation') . "</label>";
+    echo "</div>";
+    echo "</td>";
+    echo "<td id='hier_level_lbl'" . ($is_dyn ? " style='display:none'" : '') . ">" . __('Nível necessário', 'escalation') . "</td>";
+    echo "<td id='hier_level_fld'" . ($is_dyn ? " style='display:none'" : '') . ">";
     echo Html::input('hierarchy_level', [
       'value' => (int)($this->fields['hierarchy_level'] ?? 1),
       'type'  => 'number',
       'min'   => '1',
       'style' => 'width:80px',
     ]);
-    echo "&nbsp;<span class='text-muted small'>" . __('1 = nível mais alto', 'escalation') . "</span>";
+    echo "<div class='text-muted small mt-1'>" . __('1 = nível mais alto da hierarquia', 'escalation') . "</div>";
     echo "</td>";
-    echo "<td colspan='2'><span class='text-muted'>" .
-      __('O sistema percorre a cadeia de supervisores até encontrar alguém com nível ≤ ao necessário.', 'escalation') .
-      "</span></td>";
     echo "</tr>";
 
-    // Linha 4: Quórum + Fontes (visível apenas para Pessoas)
-    echo "<tr class='tab_bg_2' id='escalation_people_row'" . ($is_hier ? " style='display:none'" : '') . ">";
+    // Linha 5: Quórum + Fontes (visível apenas para tipo PESSOAS)
+    echo "<tr class='tab_bg_1' id='escalation_people_row'" . ($is_hier ? " style='display:none'" : '') . ">";
     echo "<td>" . __('Quórum', 'escalation') . "</td>";
     echo "<td>";
     Dropdown::showFromArray('quorum_type', self::getQuorumOptions(), [
@@ -336,7 +426,7 @@ class PluginEscalationStep extends CommonDBTM {
 
     echo "<script>
       function escalationToggleStepFields(type) {
-        var isHier = (type === '" . self::TYPE_HIERARCHY . "');
+        var isHier  = (type === 'hierarchy');
         var hierRow    = document.getElementById('escalation_hier_row');
         var peopleRow  = document.getElementById('escalation_people_row');
         var usersBlock = document.getElementById('escalation_users_section');
@@ -344,12 +434,20 @@ class PluginEscalationStep extends CommonDBTM {
         if (peopleRow)  peopleRow.style.display  = isHier ? 'none' : '';
         if (usersBlock) usersBlock.style.display = isHier ? 'none' : '';
       }
+
+      function escalationToggleHierDynamic(checked) {
+        ['hier_level_lbl','hier_level_fld'].forEach(function(id){
+          var el = document.getElementById(id);
+          if (el) el.style.display = checked ? 'none' : '';
+        });
+      }
     </script>";
 
     $this->showFormButtons($options);
 
-    // Seção de usuários — fora do <form> principal para evitar forms aninhados.
-    // Bootstrap card para consistência visual com GLPI 10.
+    echo Html::scriptBlock("escalationToggleStepFields('" . addslashes($current_type) . "');");
+
+    // Seção de usuários específicos (fora do form principal para evitar nesting)
     if ($ID > 0) {
       $users_style = $is_hier ? 'display:none' : '';
       echo "<hr class='mt-0 mb-4'>";

@@ -129,7 +129,7 @@ class PluginEscalationConfig extends CommonGLPI {
         echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
         echo Html::hidden('_action',  ['value' => 'delete_level']);
         echo Html::hidden('level_id', ['value' => $l['id']]);
-        echo "<button type='submit' class='vsubmit btn-sm' style='background:#ef4444;border-color:#ef4444;padding:2px 8px' "
+        echo "<button type='submit' class='vsubmit btn-sm' style='color:#ffffff;background:#ef4444;border-color:#ef4444;padding:2px 8px' "
           . "onclick=\"return confirm('" . __('Remover este nível?', 'escalation') . "')\">"
           . "<i class='ti ti-trash'></i></button>";
         Html::closeForm();

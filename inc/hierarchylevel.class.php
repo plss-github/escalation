@@ -71,11 +71,10 @@ class PluginEscalationHierarchyLevel extends CommonDBTM {
       'FROM'   => 'glpi_groups_users AS gu',
       'INNER JOIN' => [
         self::getTable() . ' AS hl' => [
-          'ON' => ['gu' => 'groups_id', 'hl' => 'items_id',
-                   'AND' => ['hl.itemtype' => 'Group']],
+          'ON' => ['gu' => 'groups_id', 'hl' => 'items_id'],
         ],
       ],
-      'WHERE'  => ['gu.users_id' => $user_id],
+      'WHERE'  => ['gu.users_id' => $user_id, 'hl.itemtype' => 'Group'],
       'ORDERBY' => ['hl.level ASC'],
       'LIMIT'  => 1,
     ])->current();

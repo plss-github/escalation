@@ -22,7 +22,7 @@ if (isset($_POST["add"])) {
   $flow->redirectToList();
 }
 
-Html::header(PluginEscalationFlow::getTypeName(Session::getPluralNumber()), $_SERVER['PHP_SELF'], "config", "pluginescalationflow");
+Html::header(PluginEscalationFlow::getTypeName(Session::getPluralNumber()), $_SERVER["PHP_SELF"], "config", "pluginescalationflow", "flow");
 
 $flow->display([
   'id' => $_GET["id"] ?? -1

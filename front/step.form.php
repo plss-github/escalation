@@ -16,16 +16,19 @@ if (isset($_POST['add'])) {
 
   $order = PluginEscalationStep::getNextOrder($flow_id);
   $input = [
-    'plugin_escalation_flows_id' => $flow_id,
-    'name'                       => $_POST['name'],
-    'type'                       => $_POST['type'],
-    'step_order'                 => $order,
-    'timeout_days'               => (int) ($_POST['timeout_days'] ?? 0),
-    'hierarchy_level'            => (int) ($_POST['hierarchy_level'] ?? 0),
-    'quorum_type'                => $_POST['quorum_type'] ?? PluginEscalationStep::QUORUM_MIN1,
-    'include_requesters'         => in_array('requesters', (array)($_POST['sources'] ?? [])) ? 1 : 0,
-    'include_assigned'           => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
-    'include_observers'          => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'plugin_escalation_flows_id'     => $flow_id,
+    'name'                           => $_POST['name'],
+    'type'                           => in_array($_POST['type'] ?? '', ['people', 'hierarchy']) ? $_POST['type'] : 'people',
+    'step_order'                     => $order,
+    'timeout_days'                   => (int) ($_POST['timeout_days'] ?? 0),
+    'hierarchy_level'                => max(1, (int) ($_POST['hierarchy_level'] ?? 1)),
+    'auto_hierarchy_dynamic'         => (int)($_POST['auto_hierarchy_dynamic'] ?? 0),
+    'generate_immediately'           => (int)($_POST['generate_immediately'] ?? 0),
+    'quorum_type'                    => $_POST['quorum_type'] ?? PluginEscalationStep::QUORUM_MIN1,
+    'include_requesters'             => in_array('requesters', (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_assigned'               => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_observers'              => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'plugin_escalation_templates_id' => (int) ($_POST['plugin_escalation_templates_id'] ?? 0),
   ];
 
   if ($new_id = $step->add($input)) {
@@ -38,15 +41,18 @@ if (isset($_POST['add'])) {
 if (isset($_POST['update'])) {
   $step->check($step_id, UPDATE);
   $step->update([
-    'id'                 => $step_id,
-    'name'               => $_POST['name'],
-    'type'               => $_POST['type'],
-    'timeout_days'       => (int) ($_POST['timeout_days'] ?? 0),
-    'hierarchy_level'    => (int) ($_POST['hierarchy_level'] ?? 0),
-    'quorum_type'        => $_POST['quorum_type'] ?? PluginEscalationStep::QUORUM_MIN1,
-    'include_requesters' => in_array('requesters', (array)($_POST['sources'] ?? [])) ? 1 : 0,
-    'include_assigned'   => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
-    'include_observers'  => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'id'                             => $step_id,
+    'name'                           => $_POST['name'],
+    'type'                           => in_array($_POST['type'] ?? '', ['people', 'hierarchy']) ? $_POST['type'] : 'people',
+    'timeout_days'                   => (int) ($_POST['timeout_days'] ?? 0),
+    'hierarchy_level'                => max(1, (int) ($_POST['hierarchy_level'] ?? 1)),
+    'auto_hierarchy_dynamic'         => (int)($_POST['auto_hierarchy_dynamic'] ?? 0),
+    'generate_immediately'           => (int)($_POST['generate_immediately'] ?? 0),
+    'quorum_type'                    => $_POST['quorum_type'] ?? PluginEscalationStep::QUORUM_MIN1,
+    'include_requesters'             => in_array('requesters', (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_assigned'               => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'include_observers'              => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
+    'plugin_escalation_templates_id' => (int) ($_POST['plugin_escalation_templates_id'] ?? 0),
   ]);
   Html::back();
 }

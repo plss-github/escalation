@@ -16,7 +16,9 @@ function plugin_escalation_install() {
   }
 
   $classesToInstall = [
+    PluginEscalationTemplate::class,
     PluginEscalationFlow::class,
+    PluginEscalationFlowCategory::class,
     PluginEscalationStep::class,
     PluginEscalationStepUser::class,
     PluginEscalationTicketFlow::class,
@@ -31,6 +33,9 @@ function plugin_escalation_install() {
     }
   }
   $migration->executeMigration();
+
+  // Migra itilcategories_id da tabela de fluxos para a tabela de junção
+  PluginEscalationFlowCategory::migrateFromFlows();
 
   // Inicializa valores padrão das configurações globais do plugin
   PluginEscalationConfig::setDefaults();
@@ -71,7 +76,9 @@ function plugin_escalation_uninstall() {
     'PluginEscalationTicketFlow',
     'PluginEscalationStepUser',
     'PluginEscalationStep',
+    'PluginEscalationFlowCategory',
     'PluginEscalationFlow',
+    'PluginEscalationTemplate',
   ];
 
   foreach ($classesToUninstall as $class) {

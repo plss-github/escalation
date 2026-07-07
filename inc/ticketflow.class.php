@@ -106,7 +106,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       'WHERE'   => ['plugin_escalation_flows_id' => $flow_id],
       'ORDERBY' => ['step_order ASC'],
     ]);
-    $steps_array = iterator_to_array($steps);
+    $steps_array = array_values(iterator_to_array($steps));
     if (empty($steps_array)) return;
 
     // Criar registro do fluxo no chamado
@@ -239,50 +239,209 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   static function activateStep(int $ticketstep_id, Ticket $ticket, array $step_data): void {
     global $DB;
 
-    // Atualizar status do ticket_step para PENDING
     $DB->update(PluginEscalationTicketStep::getTable(), [
       'status'     => PluginEscalationTicketStep::STATUS_PENDING,
       'started_at' => $_SESSION['glpi_currenttime'],
     ], ['id' => $ticketstep_id]);
 
-    if ($step_data['type'] === PluginEscalationStep::TYPE_HIERARCHY) {
-      $approvers = self::resolveHierarchyApprovers($ticket, (int) ($step_data['hierarchy_level'] ?? 1));
+    if (empty($step_data['generate_immediately'])) {
+      // Aguarda submissão de solução do chamado para gerar as aprovações
+      $fup = new ITILFollowup();
+      $fup->add([
+        'itemtype'   => 'Ticket',
+        'items_id'   => $ticket->getID(),
+        'content'    => sprintf(__('⏳ Etapa "%s" aguardando submissão de solução do chamado.', 'escalation'), $step_data['name'] ?? ''),
+        'is_private' => 1,
+      ]);
+      return;
+    }
+
+    self::generateValidationsForStep($ticketstep_id, $ticket, $step_data);
+  }
+
+  /**
+   * Resolve aprovadores e cria TicketValidation para a etapa.
+   * Usado tanto em ativação imediata quanto após submissão de solução.
+   */
+  static function generateValidationsForStep(int $ticketstep_id, Ticket $ticket, array $step_data): void {
+    global $DB;
+
+    $step_name = $step_data['name'] ?? '';
+    $step_type = $step_data['type'] ?? PluginEscalationStep::TYPE_PEOPLE;
+    $approvers = [];
+    $skip      = false;
+
+    if ($step_type === PluginEscalationStep::TYPE_HIERARCHY) {
+      if (!empty($step_data['auto_hierarchy_dynamic'])) {
+        // Dinâmico: parte do requerente, sobe via users_id_supervisor
+        $requesters = self::getTicketActors($ticket->getID(), CommonITILActor::REQUESTER);
+        foreach ($requesters as $req_id) {
+          $req_level = PluginEscalationHierarchyLevel::getUserLevel((int) $req_id);
+          if ($req_level !== null && $req_level > 1) {
+            $found = self::traverseHierarchy((int) $req_id, $req_level - 1);
+            if ($found !== null && $found !== (int) $req_id) {
+              $approvers[] = $found;
+            }
+          }
+        }
+        if (empty($approvers)) $skip = true;
+      } else {
+        // Nível fixo: parte dos responsáveis atribuídos
+        $approvers = self::resolveHierarchyApprovers($ticket, (int) ($step_data['hierarchy_level'] ?? 1));
+      }
     } else {
-      // Tipo PEOPLE: resolver aprovadores a partir das fontes configuradas
+      // PEOPLE: fontes configuradas (usuários específicos, solicitantes, responsáveis, observadores)
       $approvers = self::resolveApprovers($step_data, $ticket);
     }
 
-    // Gravar aprovadores em ticketstepapprovers
-
-    foreach ($approvers as $user_id) {
-      // Verificar se já não está na lista (idempotência)
-      $exists = $DB->request([
-        'FROM'  => 'glpi_plugin_escalation_ticketstepapprovers',
-        'WHERE' => ['plugin_escalation_ticketsteps_id' => $ticketstep_id, 'users_id' => $user_id],
-      ]);
-      if (count($exists) === 0) {
-        $DB->insert('glpi_plugin_escalation_ticketstepapprovers', [
-          'plugin_escalation_ticketsteps_id' => $ticketstep_id,
-          'users_id' => $user_id,
+    // Criar TicketValidation e anexar documentos do modelo
+    if (!$skip && !empty($approvers)) {
+      $template_content = '';
+      $tmpl_doc_ids     = [];
+      $tmpl_id = (int) ($step_data['plugin_escalation_templates_id'] ?? 0);
+      if ($tmpl_id > 0) {
+        $tmpl = new PluginEscalationTemplate();
+        if ($tmpl->getFromDB($tmpl_id)) {
+          $template_content = $tmpl->fields['content'] ?? '';
+          $tmpl_doc_ids     = PluginEscalationTemplate::getDocuments($tmpl_id);
+        }
+      }
+      foreach ($approvers as $user_id) {
+        $validation = new TicketValidation();
+        $validation->add([
+          'tickets_id'         => $ticket->getID(),
+          'itemtype_target'    => 'User',
+          'items_id_target'    => (int) $user_id,
+          'comment_submission' => $template_content,
+        ]);
+      }
+      foreach ($tmpl_doc_ids as $doc_id) {
+        $doc_item = new Document_Item();
+        $doc_item->add([
+          'itemtype'         => 'Ticket',
+          'items_id'         => $ticket->getID(),
+          'documents_id'     => (int) $doc_id,
+          '_no_message_link' => true,
         ]);
       }
     }
 
-    // Notificar via followup
-    if (!empty($approvers)) {
+    // Followup + auto-avanço quando não há aprovadores
+    if ($skip || empty($approvers)) {
+      $content = $skip
+        ? sprintf(__('⚡ Etapa "%s" ignorada — sem aprovador hierárquico definido.', 'escalation'), $step_name)
+        : sprintf(__('⚡ Etapa "%s" aprovada automaticamente (sem aprovadores configurados).', 'escalation'), $step_name);
+      $fup = new ITILFollowup();
+      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket->getID(), 'content' => $content, 'is_private' => 1]);
+
+      $DB->update(PluginEscalationTicketStep::getTable(), [
+        'status'       => PluginEscalationTicketStep::STATUS_APPROVED,
+        'completed_at' => $_SESSION['glpi_currenttime'],
+      ], ['id' => $ticketstep_id]);
+      $ts = new PluginEscalationTicketStep();
+      $ts->getFromDB($ticketstep_id);
+      self::advanceFlow($ts->fields['plugin_escalation_ticketflows_id']);
+    } else {
       $user_names = [];
       foreach ($approvers as $uid) {
         $u = new User();
         if ($u->getFromDB($uid)) $user_names[] = $u->getFriendlyName();
       }
-      $step_name = $step_data['name'];
-      $content = sprintf(
-        __('🔔 Etapa de aprovação "%s" iniciada. Aprovadores: %s.', 'escalation'),
-        $step_name,
-        implode(', ', $user_names)
-      );
       $fup = new ITILFollowup();
-      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket->getID(), 'content' => $content, 'is_private' => 1]);
+      $fup->add([
+        'itemtype'   => 'Ticket',
+        'items_id'   => $ticket->getID(),
+        'content'    => sprintf(
+          __('⚡ Etapa "%s": aprovação gerada. Aguardando validação de: %s.', 'escalation'),
+          $step_name, implode(', ', $user_names)
+        ),
+        'is_private' => 1,
+      ]);
+    }
+  }
+
+  /**
+   * Chamado quando o chamado vai para solução (status SOLVED).
+   * Ativa etapas com generate_immediately = 0 que estão aguardando.
+   */
+  static function ticketSolved(Ticket $ticket): void {
+    global $DB;
+
+    $tf_row = $DB->request([
+      'FROM'  => self::getTable(),
+      'WHERE' => ['tickets_id' => $ticket->getID(), 'status' => self::STATUS_PENDING],
+      'LIMIT' => 1,
+    ])->current();
+    if (!$tf_row) return;
+
+    $current_ts = self::getTicketStepByOrder($tf_row['id'], $tf_row['current_step']);
+    if (!$current_ts || $current_ts['status'] !== PluginEscalationTicketStep::STATUS_PENDING) return;
+
+    $step_def = new PluginEscalationStep();
+    if (!$step_def->getFromDB($current_ts['plugin_escalation_steps_id'])) return;
+
+    // Só age se este passo estava aguardando solução (generate_immediately = 0)
+    if (!empty($step_def->fields['generate_immediately'])) return;
+
+    self::generateValidationsForStep($current_ts['id'], $ticket, $step_def->fields);
+  }
+
+  /**
+   * Chamado via hook item_update quando um TicketValidation é atualizado.
+   * Se o chamado tem um fluxo ativo cuja etapa atual é AUTO, avança ou rejeita conforme o resultado.
+   */
+  static function validationUpdated(CommonDBTM $item): void {
+    global $DB;
+
+    if (!$item instanceof TicketValidation) return;
+
+    $status    = (int) $item->fields['status'];
+    $accepted  = CommonITILValidation::ACCEPTED;
+    $refused   = CommonITILValidation::REFUSED;
+    $waiting   = CommonITILValidation::WAITING;
+    if (!in_array($status, [$accepted, $refused])) return;
+
+    $ticket_id = (int) $item->fields['tickets_id'];
+
+    // Fluxo ativo para este chamado
+    $tf_row = $DB->request([
+      'FROM'  => self::getTable(),
+      'WHERE' => ['tickets_id' => $ticket_id, 'status' => self::STATUS_PENDING],
+      'LIMIT' => 1,
+    ])->current();
+    if (!$tf_row) return;
+
+    // Etapa atual em andamento
+    $current_ts = self::getTicketStepByOrder($tf_row['id'], $tf_row['current_step']);
+    if (!$current_ts || $current_ts['status'] !== PluginEscalationTicketStep::STATUS_PENDING) return;
+
+    // Verificar se a etapa atual usa TicketValidations (generate_immediately ou após solução)
+    $step_def = new PluginEscalationStep();
+    if (!$step_def->getFromDB($current_ts['plugin_escalation_steps_id'])) return;
+
+    if ($status === $refused) {
+      // Qualquer recusa rejeita o fluxo
+      $DB->update(PluginEscalationTicketStep::getTable(), [
+        'status'       => PluginEscalationTicketStep::STATUS_REJECTED,
+        'completed_at' => $_SESSION['glpi_currenttime'],
+      ], ['id' => $current_ts['id']]);
+      self::completeFlow($tf_row['id'], self::STATUS_REJECTED);
+      return;
+    }
+
+    // Verificar se ainda há validações aguardando no chamado
+    $pending = count($DB->request([
+      'FROM'  => TicketValidation::getTable(),
+      'WHERE' => ['tickets_id' => $ticket_id, 'status' => $waiting],
+    ]));
+
+    if ($pending === 0) {
+      // Todas as validações desta etapa foram aprovadas
+      $DB->update(PluginEscalationTicketStep::getTable(), [
+        'status'       => PluginEscalationTicketStep::STATUS_APPROVED,
+        'completed_at' => $_SESSION['glpi_currenttime'],
+      ], ['id' => $current_ts['id']]);
+      self::advanceFlow($tf_row['id']);
     }
   }
 
@@ -434,6 +593,8 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         echo "<td>" . PluginEscalationStep::getTypeName_($ts['type']);
         if ($ts['type'] === PluginEscalationStep::TYPE_PEOPLE) {
           echo " / " . PluginEscalationStep::getQuorumName($ts['quorum_type']);
+        } elseif ($ts['type'] === PluginEscalationStep::TYPE_AUTO) {
+          echo " — " . __('Auto-executado', 'escalation');
         }
         echo "</td>";
         echo "<td>";

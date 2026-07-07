@@ -19,7 +19,10 @@ function plugin_init_escalation() {
 
   $PLUGIN_HOOKS['item_add']['escalation']        = ['Ticket' => ['PluginEscalationFlow', 'ticketAdd']];
   $PLUGIN_HOOKS['pre_item_update']['escalation'] = ['Ticket' => ['PluginEscalationFlow', 'preTicketUpdate']];
-  $PLUGIN_HOOKS['item_update']['escalation']     = ['Ticket' => ['PluginEscalationFlow', 'ticketUpdate']];
+  $PLUGIN_HOOKS['item_update']['escalation']     = [
+    'Ticket'           => ['PluginEscalationFlow', 'ticketUpdate'],
+    'TicketValidation' => ['PluginEscalationTicketFlow', 'validationUpdated'],
+  ];
 
   // Adiciona aba "Aprovação" na tela do chamado
   Plugin::registerClass('PluginEscalationTicketFlow', ['addtabon' => 'Ticket']);
