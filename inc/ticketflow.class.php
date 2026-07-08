@@ -60,7 +60,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0) {
     if ($item->getType() === 'Ticket') {
       $count = self::countActiveFlows($item->getID());
-      return [1 => self::createTabEntry(__('Aprovação', 'escalation'), $count)];
+      return [1 => self::createTabEntry(__('Aprovação', 'escalation'), $count, null, 'ti ti-sitemap')];
     }
     return '';
   }
@@ -296,14 +296,17 @@ class PluginEscalationTicketFlow extends CommonDBTM {
 
     // Criar TicketValidation e anexar documentos do modelo
     if (!$skip && !empty($approvers)) {
-      $template_content = '';
-      $tmpl_doc_ids     = [];
+      $submission_content = trim($step_data['content'] ?? '');
+      $tmpl_doc_ids       = [];
       $tmpl_id = (int) ($step_data['plugin_escalation_templates_id'] ?? 0);
       if ($tmpl_id > 0) {
         $tmpl = new PluginEscalationTemplate();
         if ($tmpl->getFromDB($tmpl_id)) {
-          $template_content = $tmpl->fields['content'] ?? '';
-          $tmpl_doc_ids     = PluginEscalationTemplate::getDocuments($tmpl_id);
+          // Template tem prioridade no conteúdo caso o step não tenha texto próprio
+          if (empty($submission_content)) {
+            $submission_content = trim($tmpl->fields['content'] ?? '');
+          }
+          $tmpl_doc_ids = PluginEscalationTemplate::getDocuments($tmpl_id);
         }
       }
       foreach ($approvers as $user_id) {
@@ -312,7 +315,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
           'tickets_id'         => $ticket->getID(),
           'itemtype_target'    => 'User',
           'items_id_target'    => (int) $user_id,
-          'comment_submission' => $template_content,
+          'comment_submission' => $submission_content,
         ]);
       }
       foreach ($tmpl_doc_ids as $doc_id) {

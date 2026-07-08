@@ -12,7 +12,8 @@ if (isset($_POST['add'])) {
     'content'       => $_POST['content'] ?? '',
     'documents_ids' => (array) ($_POST['documents_ids'] ?? []),
   ])) {
-    Html::redirect(PluginEscalationTemplate::getFormURL() . "?id=$new_id");
+    $modal_qs = !empty($_REQUEST['_in_modal']) ? '&_in_modal=1' : '';
+    Html::redirect(PluginEscalationTemplate::getFormURL() . "?id=$new_id{$modal_qs}");
   }
   Html::back();
 }
@@ -35,5 +36,10 @@ if (isset($_POST['purge'])) {
 }
 
 Html::header(PluginEscalationTemplate::getTypeName(1), $_SERVER['PHP_SELF'], 'config', 'pluginescalationflow', 'template');
-$template->display(['id' => $id]);
+if (!empty($_REQUEST['_in_modal'])) {
+  $template->getFromDB($id);
+  $template->showForm($id);
+} else {
+  $template->display(['id' => $id]);
+}
 Html::footer();

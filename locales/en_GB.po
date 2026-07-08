@@ -1,33 +1,488 @@
-# English (GB) translations for escalation plugin.
-# Copyright (C) 2026 Ampris
+# Translation of escalation plugin for GLPI
+# Copyright (C) 2026 Escalation Plugin
 # This file is distributed under the same license as the escalation package.
-# Automatically generated, 2026.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: \n"
-"Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-28 00:00-0300\n"
-"PO-Revision-Date: 2026-06-28 00:00-0300\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+"Project-Id-Version: escalation 1.0\n"
+"POT-Creation-Date: 2026-07-08 00:00-0300\n"
+"PO-Revision-Date: 2026-07-08 00:00-0300\n"
+"Last-Translator: \n"
+"Language-Team: English (United Kingdom) \n"
 "Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
-"X-Generator: Poedit 3.9\n"
+
+#: inc/step.class.php:364
+msgid "0 = desativado"
+msgstr "0 = disabled"
+
+#: inc/flow.class.php:251
+msgid "0 = sem reprovação automática"
+msgstr "0 = no automatic rejection"
+
+#: inc/step.class.php:469
+msgid "1 = nível mais alto da hierarquia"
+msgstr "1 = highest hierarchy level"
+
+#: inc/flow.class.php:149 inc/flow.class.php:181
+msgid "Active"
+msgstr "Active"
+
+#: inc/flow.class.php:217
+msgid "Add"
+msgstr "Add"
+
+#: inc/step.class.php:141
+msgid "Adicionar Etapa"
+msgstr "Add Step"
+
+#: inc/stepuser.class.php:96
+msgid "Adicionar usuário"
+msgstr "Add user"
+
+#: inc/ticketstep.class.php:72
+msgid "Aguardando"
+msgstr "Waiting"
+
+#: inc/ticketflow.class.php:767 inc/ticketstep.class.php:74
+msgid "Aprovado"
+msgstr "Approved"
+
+#: front/approval.form.php:63 inc/ticketflow.class.php:623
+msgid "Aprovar"
+msgstr "Approve"
+
+#: inc/approval.class.php:17 inc/ticketflow.class.php:63
+msgid "Aprovação"
+msgid_plural "Aprovações"
+msgstr[0] "Approval"
+msgstr[1] "Approvals"
+
+#: front/approval.form.php:47
+msgid "Aprovação de Chamado"
+msgstr "Ticket Approval"
+
+#: inc/step.class.php:238
+msgid "Após solução"
+msgstr "After solution"
+
+#: inc/step.class.php:490
+msgid "Atribuídos"
+msgstr "Assigned"
+
+#: inc/ticketflow.class.php:600
+msgid "Auto-executado"
+msgstr "Auto-executed"
+
+#: inc/step.class.php:226
+msgid "Ações"
+msgstr "Actions"
+
+#: inc/flow.class.php:155
+msgid "Categoria ITIL"
+msgstr "ITIL Category"
+
+#: inc/config.class.php:90 inc/config.class.php:113 inc/config.class.php:159
+msgid "Categoria de usuário"
+msgstr "User category"
+
+#: inc/flowcategory.class.php:11
+msgid "Categoria do Fluxo"
+msgid_plural "Categorias do Fluxo"
+msgstr[0] "Flow Category"
+msgstr[1] "Flow Categories"
+
+#: inc/flow.class.php:186
+msgid "Categorias ITIL"
+msgstr "ITIL Categories"
+
+#: front/approval.form.php:51
+msgid "Chamado"
+msgstr "Ticket"
+
+#: inc/flow.class.php:142
+msgid "Characteristics"
+msgstr "Characteristics"
+
+#: front/approval.form.php:59
+msgid "Comentário"
+msgstr "Comment"
+
+#: inc/ticketflow.class.php:622
+msgid "Comentário (opcional)"
+msgstr "Comment (optional)"
+
+#: front/config.form.php:14
+msgid "Configurações salvas."
+msgstr "Settings saved."
+
+#: inc/template.class.php:116 inc/template.class.php:135
+msgid "Conteúdo"
+msgstr "Content"
+
+#: inc/step.class.php:393
+msgid "Criar modelo"
+msgstr "Create template"
+
+#: inc/config.class.php:94
+msgid ""
+"Define se os níveis hierárquicos são identificados pelo grupo ou pela "
+"categoria do usuário."
+msgstr "Defines whether hierarchy levels are identified by group or by user category."
+
+#: inc/step.class.php:175
+msgid "Dinâmico"
+msgstr "Dynamic"
+
+#: inc/step.class.php:245
+msgid "Dinâmico (nível do solicitante - 1)"
+msgstr "Dynamic (requester level - 1)"
+
+#: inc/template.class.php:143
+msgid "Documentos anexos"
+msgstr "Attached documents"
+
+#: inc/config.class.php:10 inc/flow.class.php:107
+msgid "Escalation"
+msgstr "Escalation"
+
+#: front/approval.form.php:53 inc/step.class.php:20
+msgid "Etapa"
+msgid_plural "Etapas"
+msgstr[0] "Step"
+msgstr[1] "Steps"
+
+#: inc/ticketflow.class.php:700
+#, php-format
+msgid "Etapa \"%s\" (ID %d) sofreu reprovação automática após %d dia(s)."
+msgstr ""
+
+#: front/approval.form.php:31
+msgid "Etapa de aprovação não encontrada."
+msgstr "Approval step not found."
+
+#: inc/ticketstep.class.php:20
+msgid "Etapa do Chamado"
+msgid_plural "Etapas do Chamado"
+msgstr[0] "Ticket Step"
+msgstr[1] "Ticket Steps"
+
+#: inc/flow.class.php:268
+msgid "Etapas"
+msgstr "Steps"
+
+#: inc/step.class.php:287
+msgid "Excluir esta etapa?"
+msgstr "Delete this step?"
 
 #: inc/flow.class.php:11
-msgid "Fluxo de Aprovação"
-msgid_plural "Fluxos de Aprovação"
-msgstr[0] "Approval Flow"
-msgstr[1] "Approval Flows"
+msgid "Fluxo"
+msgid_plural "Fluxos"
+msgstr[0] "Flow"
+msgstr[1] "Flows"
 
-#: hook.php:11 hook.php:15
-msgid "MySQL instalação das tables"
-msgstr "MySQL install tables"
+#: inc/ticketflow.class.php:751
+#, php-format
+msgid ""
+"Fluxo \"%s\" (ID %d) sofreu reprovação automática global após %d dia(s)."
+msgstr ""
 
-#: hook.php:53
+#: inc/ticketflow.class.php:20
+msgid "Fluxo do Chamado"
+msgid_plural "Fluxos do Chamado"
+msgstr[0] "Ticket Flow"
+msgstr[1] "Ticket Flows"
+
+#: inc/step.class.php:225
+msgid "Fontes"
+msgstr "Sources"
+
+#: inc/step.class.php:481
+msgid "Fontes de aprovadores"
+msgstr "Approver sources"
+
+#: inc/step.class.php:340
+msgid ""
+"Gera a aprovação assim que o chamado é criado (ou a etapa anterior for "
+"concluída). Desmarcado: aguarda o chamado ir para Solucionado."
+msgstr "Generates the approval as soon as the ticket is created (or the previous step is completed). Unchecked: waits for the ticket to go to Resolved."
+
+#: inc/step.class.php:221
+msgid "Gerar"
+msgstr "Generate"
+
+#: inc/step.class.php:335
+msgid "Gerar imediatamente?"
+msgstr "Generate immediately?"
+
+#: inc/config.class.php:89 inc/config.class.php:114 inc/config.class.php:160
+msgid "Grupo"
+msgstr "Group"
+
+#: inc/step.class.php:105
+msgid "Hierarquia"
+msgstr "Hierarchy"
+
+#: inc/config.class.php:82
+msgid "Hierarquia de Aprovação"
+msgstr "Approval Hierarchy"
+
+#: inc/step.class.php:439
+msgid "Hierarquia dinâmica?"
+msgstr "Dynamic hierarchy?"
+
+#: inc/step.class.php:237
+msgid "Imediato"
+msgstr "Immediate"
+
+#: inc/step.class.php:112
+msgid "Maioria"
+msgstr "Majority"
+
+#: inc/step.class.php:431
+msgid "Mensagem enviada aos aprovadores. Deixe vazio para não enviar mensagem."
+msgstr "Message sent to approvers. Leave empty to send no message."
+
+#: inc/flow.class.php:105 inc/template.class.php:8
+msgid "Modelo"
+msgid_plural "Modelos"
+msgstr[0] "Template"
+msgstr[1] "Templates"
+
+#: inc/step.class.php:374
+msgid "Modelo de validação"
+msgstr "Validation template"
+
+#: hook.php:69
 msgid "MySQL desinstalação das tables"
-msgstr "MySQL uninstall tables"
+msgstr "MySQL table uninstallation"
+
+#: hook.php:10 hook.php:14
+msgid "MySQL instalação das tables"
+msgstr "MySQL table installation"
+
+#: inc/step.class.php:111
+msgid "Mínimo 1"
+msgstr "Minimum 1"
+
+#: inc/flow.class.php:145 inc/flow.class.php:179 inc/template.class.php:114
+#: inc/template.class.php:130
+msgid "Name"
+msgstr "Name"
+
+#: inc/ticketflow.class.php:565
+msgid "Nenhum fluxo de aprovação ativo para este chamado."
+msgstr "No active approval flow for this ticket."
+
+#: inc/config.class.php:120
+msgid "Nenhum nível configurado."
+msgstr "No level configured."
+
+#: inc/step.class.php:211
+msgid "Nenhuma etapa configurada."
+msgstr "No step configured."
+
+#. Nome
+#: inc/step.class.php:145 inc/step.class.php:219 inc/step.class.php:321
+msgid "Nome"
+msgstr "Name"
+
+#. Hierarquia: nível + dinâmico (ocultos por padrão — tipo padrão é Pessoas)
+#: inc/config.class.php:111 inc/config.class.php:149 inc/step.class.php:162
+msgid "Nível"
+msgstr "Level"
+
+#: inc/config.class.php:125 inc/hierarchylevel.class.php:143
+#: inc/step.class.php:247
+#, php-format
+msgid "Nível %d"
+msgstr "Level %d"
+
+#: front/config.form.php:32
+#, php-format
+msgid "Nível %d adicionado."
+msgstr "Level %d added."
+
+#: inc/hierarchylevel.class.php:15
+msgid "Nível de Hierarquia"
+msgid_plural "Níveis de Hierarquia"
+msgstr[0] "Hierarchy Level"
+msgstr[1] "Hierarchy Levels"
+
+#: inc/step.class.php:224
+msgid "Nível hierárquico"
+msgstr "Hierarchy level"
+
+#: inc/step.class.php:461
+msgid "Nível necessário"
+msgstr "Required level"
+
+#: front/config.form.php:50
+msgid "Nível removido."
+msgstr "Level removed."
+
+#: inc/step.class.php:489 inc/step.class.php:554
+msgid "Observadores"
+msgstr "Watchers"
+
+#: inc/ticketflow.class.php:766 inc/ticketstep.class.php:73
+msgid "Pendente"
+msgstr "Pending"
+
+#: inc/step.class.php:104
+msgid "Pessoas"
+msgstr "People"
+
+#: inc/step.class.php:223
+msgid "Prazo"
+msgstr "Deadline"
+
+#. Reprovação
+#: inc/step.class.php:158
+msgid "Prazo (dias)"
+msgstr "Deadline (days)"
+
+#: front/config.form.php:36
+msgid "Preencha o nível e selecione um grupo/categoria."
+msgstr "Fill in the level and select a group/category."
+
+#: inc/step.class.php:222 inc/step.class.php:475
+msgid "Quórum"
+msgstr "Quorum"
+
+#: inc/stepuser.class.php:74
+msgid "Remover"
+msgstr "Remove"
+
+#: inc/config.class.php:133
+msgid "Remover este nível?"
+msgstr "Remove this level?"
+
+#: inc/stepuser.class.php:74
+msgid "Remover este usuário?"
+msgstr "Remove this user?"
+
+#: inc/ticketflow.class.php:768 inc/ticketstep.class.php:75
+msgid "Reprovado"
+msgstr "Rejected"
+
+#: front/approval.form.php:65 inc/ticketflow.class.php:624
+msgid "Reprovar"
+msgstr "Reject"
+
+#: inc/ticketflow.class.php:769 inc/ticketstep.class.php:76
+msgid "Reprovação automática"
+msgstr "Automatic rejection"
+
+#: inc/step.class.php:356
+msgid "Reprovação automática (dias)"
+msgstr "Automatic rejection (days)"
+
+#: inc/flow.class.php:167 inc/flow.class.php:248
+msgid "Reprovação automática global (dias)"
+msgstr "Global automatic rejection (days)"
+
+#: inc/step.class.php:488
+msgid "Requerentes"
+msgstr "Requesters"
+
+#: inc/step.class.php:553
+msgid "Responsáveis"
+msgstr "Technicians"
+
+#: inc/step.class.php:552
+msgid "Solicitantes"
+msgstr "Requesters"
+
+#: front/approval.form.php:50
+msgid "Solicitação de Aprovação"
+msgstr "Approval Request"
+
+#: inc/step.class.php:426
+msgid "Texto da aprovação"
+msgstr "Approval text"
+
+#. Tipo
+#: inc/step.class.php:149 inc/step.class.php:220 inc/step.class.php:323
+msgid "Tipo"
+msgstr "Type"
+
+#: inc/config.class.php:86
+msgid "Tipo de hierarquia"
+msgstr "Hierarchy type"
+
+#: inc/step.class.php:113
+msgid "Todos"
+msgstr "All"
+
+#: inc/step.class.php:444
+msgid ""
+"Usa o nível hierárquico do solicitante - 1 como alvo. O campo \"Nível "
+"necessário\" é ignorado quando ativo."
+msgstr ""
+
+#: inc/stepuser.class.php:15
+msgid "Usuário da Etapa"
+msgid_plural "Usuários da Etapa"
+msgstr[0] "Step User"
+msgstr[1] "Step Users"
+
+#: inc/step.class.php:535
+msgid "Usuários específicos"
+msgstr "Specific users"
+
+#: inc/ticketflow.class.php:645
+msgid ""
+"Verifica e reprova automaticamente etapas/fluxos de aprovação que "
+"ultrapassaram o prazo configurado."
+msgstr "Automatically checks and rejects approval steps/flows that have exceeded the configured deadline."
+
+#: front/approval.form.php:39
+msgid "Você já registrou seu voto nesta etapa."
+msgstr "You have already registered your vote on this step."
+
+#: front/approval.form.php:35
+msgid "Você não é um aprovador desta etapa."
+msgstr "You are not an approver of this step."
+
+#: inc/ticketflow.class.php:206
+#, php-format
+msgid ""
+"⏰ Fluxo de aprovação \"%s\" atingiu o prazo de reprovação automática. "
+"Chamado reprovado automaticamente."
+msgstr ""
+
+#: inc/ticketflow.class.php:253
+#, php-format
+msgid "⏳ Etapa \"%s\" aguardando submissão de solução do chamado."
+msgstr ""
+
+#: inc/ticketflow.class.php:336
+#, php-format
+msgid ""
+"⚡ Etapa \"%s\" aprovada automaticamente (sem aprovadores configurados)."
+msgstr ""
+
+#: inc/ticketflow.class.php:335
+#, php-format
+msgid "⚡ Etapa \"%s\" ignorada — sem aprovador hierárquico definido."
+msgstr ""
+
+#: inc/ticketflow.class.php:358
+#, php-format
+msgid "⚡ Etapa \"%s\": aprovação gerada. Aguardando validação de: %s."
+msgstr ""
+
+#: inc/ticketflow.class.php:203
+#, php-format
+msgid "✅ Fluxo de aprovação \"%s\" concluído. Chamado aprovado."
+msgstr ""
+
+#: inc/ticketflow.class.php:209
+#, php-format
+msgid "❌ Fluxo de aprovação \"%s\" concluído. Chamado reprovado."
+msgstr ""
+

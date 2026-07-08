@@ -121,6 +121,9 @@ class PluginEscalationTemplate extends CommonDBTM {
     global $DB;
 
     $this->initForm($ID, $options);
+    if (!empty($_REQUEST['_in_modal'])) {
+      $options['target'] = $this->getFormURL() . '?_in_modal=1';
+    }
     $this->showFormHeader($options);
 
     echo "<tr class='tab_bg_1'>";

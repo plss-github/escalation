@@ -47,6 +47,7 @@ class PluginEscalationStep extends CommonDBTM {
         `include_assigned` tinyint(1) NOT NULL DEFAULT '0',
         `include_observers` tinyint(1) NOT NULL DEFAULT '0',
         `plugin_escalation_templates_id` int {$default_key_sign} NOT NULL DEFAULT '0',
+        `content` longtext COLLATE {$default_collation},
         PRIMARY KEY (`id`),
         KEY `plugin_escalation_flows_id` (`plugin_escalation_flows_id`),
         KEY `step_order` (`step_order`)
@@ -75,6 +76,9 @@ class PluginEscalationStep extends CommonDBTM {
           $DB->update(self::getTable(), ['type' => self::TYPE_PEOPLE, 'generate_immediately' => 1],
             ['type' => 'auto']);
         }
+      }
+      if (!$DB->fieldExists(self::getTable(), 'content')) {
+        $DB->doQuery("ALTER TABLE `" . self::getTable() . "` ADD COLUMN `content` longtext COLLATE {$default_collation}");
       }
     }
   }
@@ -328,9 +332,17 @@ class PluginEscalationStep extends CommonDBTM {
     // Linha 2: Gerar imediatamente + Reprovação automática
     $rand_gi = 'gen_immed_' . mt_rand();
     echo "<tr class='tab_bg_2'>";
-    echo "<td>" . __('Gerar imediatamente?', 'escalation') . "</td>";
+    echo "<td>" . __('Gerar imediatamente?', 'escalation');
+    echo "<span class='form-help' style='margin-left:3px'
+              data-bs-toggle='tooltip'
+              data-bs-placement='top'
+              data-bs-html='true'
+              data-bs-title='" . __('Gera a aprovação assim que o chamado é criado (ou a etapa anterior for concluída). Desmarcado: aguarda o chamado ir para Solucionado.', 'escalation') . "'>
+            ?
+        </span>" . "</td>";
     echo "<td>";
-    echo "<div class='form-check'>";
+    echo "<div class='d-flex align-items-center gap-1'>";
+    echo "<div class='form-check mb-0'>";
     echo Html::getCheckbox([
       'name'          => 'generate_immediately',
       'id'            => $rand_gi,
@@ -338,8 +350,7 @@ class PluginEscalationStep extends CommonDBTM {
       'checked'       => $gen_immed,
       'zero_on_empty' => true,
     ]);
-    echo "<label for='$rand_gi' class='form-check-label'>"
-       . __('Gera a aprovação assim que possível.', 'escalation') . "</label>";
+    echo "</div>";
     echo "</div>";
     echo "</td>";
     echo "<td>" . __('Reprovação automática (dias)', 'escalation') . "</td>";
@@ -354,25 +365,88 @@ class PluginEscalationStep extends CommonDBTM {
     echo "</td>";
     echo "</tr>";
 
-    // Linha 3: Template (para todos os tipos)
+    // Linha 3: Template (para todos os tipos) + botão criar
+    $tmpl_rand  = mt_rand();
+    $tmpl_fid   = Html::cleanId("dropdown_plugin_escalation_templates_id{$tmpl_rand}");
+    $tmpl_modal = "modal_add_tmpl_{$tmpl_rand}";
+    $cur_tmpl   = (int) ($this->fields['plugin_escalation_templates_id'] ?? 0);
     echo "<tr class='tab_bg_1'>";
     echo "<td>" . __('Modelo de validação', 'escalation') . "</td>";
     echo "<td colspan='3'>";
+    $fid_esc = htmlescape($tmpl_fid);
+    echo "<style>
+      #{$fid_esc} ~ .select2-container { flex:1; min-width:0; }
+      #{$fid_esc} ~ .select2-container .select2-selection.select2-selection--single { width:100% !important; max-width:none !important; }
+    </style>";
+    echo "<div class='btn-group btn-group-sm w-100' role='group'>";
     Dropdown::show('PluginEscalationTemplate', [
       'name'                => 'plugin_escalation_templates_id',
-      'value'               => $this->fields['plugin_escalation_templates_id'] ?? 0,
+      'value'               => $cur_tmpl,
       'display_emptychoice' => true,
-      'width'               => '300px',
+      'width'               => '100%',
+      'rand'                => $tmpl_rand,
+      'on_change'           => "escalationToggleStepContent(this.value)",
     ]);
+    echo Ajax::createIframeModalWindow($tmpl_modal, PluginEscalationTemplate::getFormURL(), ['display' => false]);
+    echo "<div class='btn btn-outline-secondary' data-bs-toggle='modal'"
+       . " data-bs-target='#" . htmlescape($tmpl_modal) . "'"
+       . " title='" . __s('Criar modelo', 'escalation') . "'>"
+       . "<span data-bs-toggle='tooltip'><i class='ti ti-plus'></i></span>"
+       . "</div>";
+    echo "</div>";
+    $fid_js   = json_encode($tmpl_fid);
+    $mid_js   = json_encode($tmpl_modal);
+    $ajax_url = json_encode(Plugin::getWebDir('escalation') . '/ajax/templates.php');
+    echo Html::scriptBlock("
+      \$(function() {
+        document.getElementById({$mid_js})?.addEventListener('hidden.bs.modal', function() {
+          var sel = document.getElementById({$fid_js});
+          if (!sel) return;
+          var existing = new Set(Array.from(sel.options).map(function(o) { return o.value; }));
+          fetch({$ajax_url})
+            .then(function(r) { return r.json(); })
+            .then(function(items) {
+              items.forEach(function(item) {
+                if (!existing.has(String(item.id))) {
+                  \$('#' + {$fid_js}).append(new Option(item.text, item.id, false, true));
+                }
+              });
+              \$('#' + {$fid_js}).trigger('change');
+            });
+        });
+      });
+    ");
+    echo "</td>";
+    echo "</tr>";
+
+    // Linha 3b: Conteúdo da aprovação (visível apenas quando nenhum modelo selecionado)
+    $has_tmpl    = $cur_tmpl > 0;
+    $cur_content = $this->fields['content'] ?? '';
+    echo "<tr class='tab_bg_2' id='escalation_content_row'" . ($has_tmpl ? " style='display:none'" : '') . ">";
+    echo "<td>" . __('Texto da aprovação', 'escalation') . "</td>";
+    echo "<td colspan='3'>";
+    Html::textarea(['name' => 'content', 'value' => htmlspecialchars($cur_content, ENT_QUOTES) ?? '',
+                'enable_richtext' => true, 'cols' => 100, 'rows' => 10]);
+    echo "<div class='text-muted small mt-1'>"
+       . __('Mensagem enviada aos aprovadores. Deixe vazio para não enviar mensagem.', 'escalation')
+       . "</div>";
     echo "</td>";
     echo "</tr>";
 
     // Linha 4: Configurações de Hierarquia (visível apenas para tipo HIERARQUIA)
     $rand_dyn = 'hier_dyn_' . mt_rand();
     echo "<tr class='tab_bg_2' id='escalation_hier_row'" . ($is_hier ? '' : " style='display:none'") . ">";
-    echo "<td>" . __('Hierarquia dinâmica?', 'escalation') . "</td>";
+    echo "<td>" . __('Hierarquia dinâmica?', 'escalation');
+    echo "<span class='form-help' style='margin-left:3px'
+              data-bs-toggle='tooltip'
+              data-bs-placement='top'
+              data-bs-html='true'
+              data-bs-title='" . __('Usa o nível hierárquico do solicitante - 1 como alvo. O campo "Nível necessário" é ignorado quando ativo.', 'escalation') . "'>
+            ?
+        </span>" . "</td>";
     echo "<td>";
-    echo "<div class='form-check'>";
+    echo "<div class='d-flex align-items-center gap-1'>";
+    echo "<div class='form-check mb-0'>";
     echo Html::getCheckbox([
       'name'          => 'auto_hierarchy_dynamic',
       'id'            => $rand_dyn,
@@ -381,8 +455,7 @@ class PluginEscalationStep extends CommonDBTM {
       'zero_on_empty' => true,
       'onclick'       => 'escalationToggleHierDynamic(this.checked)',
     ]);
-    echo "<label for='$rand_dyn' class='form-check-label'>"
-       . __('Usa nível do solicitante - 1.', 'escalation') . "</label>";
+    echo "</div>";
     echo "</div>";
     echo "</td>";
     echo "<td id='hier_level_lbl'" . ($is_dyn ? " style='display:none'" : '') . ">" . __('Nível necessário', 'escalation') . "</td>";
@@ -412,9 +485,9 @@ class PluginEscalationStep extends CommonDBTM {
     if (!empty($this->fields['include_assigned']))   $current_sources[] = 'assigned';
     if (!empty($this->fields['include_observers']))  $current_sources[] = 'observers';
     Dropdown::showFromArray('sources', [
-      'requesters' => __('Solicitantes', 'escalation'),
-      'assigned'   => __('Responsáveis', 'escalation'),
+      'requesters' => __('Requerentes', 'escalation'),
       'observers'  => __('Observadores', 'escalation'),
+      'assigned'   => __('Atribuídos', 'escalation'),
     ], [
       'values'              => $current_sources,
       'multiple'            => true,
@@ -433,6 +506,11 @@ class PluginEscalationStep extends CommonDBTM {
         if (hierRow)    hierRow.style.display    = isHier ? '' : 'none';
         if (peopleRow)  peopleRow.style.display  = isHier ? 'none' : '';
         if (usersBlock) usersBlock.style.display = isHier ? 'none' : '';
+      }
+
+      function escalationToggleStepContent(tmplId) {
+        var row = document.getElementById('escalation_content_row');
+        if (row) row.style.display = (parseInt(tmplId) > 0) ? 'none' : '';
       }
 
       function escalationToggleHierDynamic(checked) {

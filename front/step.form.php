@@ -29,6 +29,7 @@ if (isset($_POST['add'])) {
     'include_assigned'               => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
     'include_observers'              => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
     'plugin_escalation_templates_id' => (int) ($_POST['plugin_escalation_templates_id'] ?? 0),
+    'content'                        => $_POST['content'] ?? '',
   ];
 
   if ($new_id = $step->add($input)) {
@@ -53,6 +54,7 @@ if (isset($_POST['update'])) {
     'include_assigned'               => in_array('assigned',   (array)($_POST['sources'] ?? [])) ? 1 : 0,
     'include_observers'              => in_array('observers',  (array)($_POST['sources'] ?? [])) ? 1 : 0,
     'plugin_escalation_templates_id' => (int) ($_POST['plugin_escalation_templates_id'] ?? 0),
+    'content'                        => $_POST['content'] ?? '',
   ]);
   Html::back();
 }
