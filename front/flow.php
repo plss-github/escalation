@@ -6,7 +6,7 @@ if (!defined('GLPI_ROOT')) {
 
 Session::checkRight("config", READ);
 
-Html::header(PluginEscalationFlow::getTypeName(Session::getPluralNumber()), $_SERVER["PHP_SELF"], "config", "pluginescalationflow", "flow");
+Html::header(PluginEscalationFlow::getTypeName(Session::getPluralNumber()), $_SERVER["PHP_SELF"], "admin", "pluginescalationflow", "flow");
 
 Search::show('PluginEscalationFlow');
 

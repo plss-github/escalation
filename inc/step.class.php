@@ -94,6 +94,13 @@ class PluginEscalationStep extends CommonDBTM {
     $DB->delete(PluginEscalationStepUser::getTable(), ['plugin_escalation_steps_id' => $this->fields['id']]);
   }
 
+  public function prepareInputForAdd($input) {
+    if (empty($input['step_order']) && !empty($input['plugin_escalation_flows_id'])) {
+      $input['step_order'] = self::getNextOrder((int) $input['plugin_escalation_flows_id']);
+    }
+    return $input;
+  }
+
   static function canCreate(): bool { return Session::haveRight(self::$rightname, UPDATE); }
   static function canView(): bool   { return Session::haveRight(self::$rightname, READ); }
   static function canUpdate(): bool { return Session::haveRight(self::$rightname, UPDATE); }
@@ -425,7 +432,7 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<tr class='tab_bg_2' id='escalation_content_row'" . ($has_tmpl ? " style='display:none'" : '') . ">";
     echo "<td>" . __('Texto da aprovação', 'escalation') . "</td>";
     echo "<td colspan='3'>";
-    Html::textarea(['name' => 'content', 'value' => htmlspecialchars($cur_content, ENT_QUOTES) ?? '',
+    Html::textarea(['name' => 'content', 'value' => $cur_content ?? '',
                 'enable_richtext' => true, 'cols' => 100, 'rows' => 10]);
     echo "<div class='text-muted small mt-1'>"
        . __('Mensagem enviada aos aprovadores. Deixe vazio para não enviar mensagem.', 'escalation')

@@ -15,7 +15,7 @@ function plugin_init_escalation() {
   $PLUGIN_HOOKS['csrf_compliant']['escalation'] = true;
 
   $PLUGIN_HOOKS['config_page']['escalation'] = 'front/flow.php';
-  $PLUGIN_HOOKS['menu_toadd']['escalation'] = ['config' => 'PluginEscalationFlow'];
+  $PLUGIN_HOOKS['menu_toadd']['escalation'] = ['admin' => 'PluginEscalationFlow'];
 
   $PLUGIN_HOOKS['item_add']['escalation']        = ['Ticket' => ['PluginEscalationFlow', 'ticketAdd']];
   $PLUGIN_HOOKS['pre_item_update']['escalation'] = ['Ticket' => ['PluginEscalationFlow', 'preTicketUpdate']];

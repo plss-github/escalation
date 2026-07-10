@@ -87,6 +87,6 @@ if (isset($_POST['move_down'])) {
 }
 
 // ---- Exibir formulário de edição -------------------------------------------
-Html::header(PluginEscalationStep::getTypeName(1), $_SERVER['PHP_SELF'], "config", "pluginescalationflow");
+Html::header(PluginEscalationStep::getTypeName(1), $_SERVER['PHP_SELF'], "admin", "pluginescalationflow", "flow");
 $step->display(['id' => $step_id]);
 Html::footer();

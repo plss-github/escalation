@@ -35,7 +35,7 @@ if (isset($_POST['purge'])) {
   Html::redirect(PluginEscalationTemplate::getSearchURL());
 }
 
-Html::header(PluginEscalationTemplate::getTypeName(1), $_SERVER['PHP_SELF'], 'config', 'pluginescalationflow', 'template');
+Html::header(PluginEscalationTemplate::getTypeName(1), $_SERVER['PHP_SELF'], 'admin', 'pluginescalationflow', 'template');
 if (!empty($_REQUEST['_in_modal'])) {
   $template->getFromDB($id);
   $template->showForm($id);
