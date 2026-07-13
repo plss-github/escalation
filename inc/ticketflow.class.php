@@ -570,24 +570,6 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   // -------------------------------------------------------------------------
 
   /**
-   * Encontra aprovadores para uma etapa de hierarquia.
-   *
-   * Para cada técnico responsável pelo chamado, sobe a cadeia de supervisores
-   * até encontrar alguém cujo nível hierárquico seja <= $required_level.
-   */
-  static function resolveHierarchyApprovers(Ticket $ticket, int $required_level): array {
-    $assigned = self::getTicketActors($ticket->getID(), CommonITILActor::ASSIGN);
-    $approvers = [];
-    foreach ($assigned as $user_id) {
-      $found = self::traverseHierarchy((int) $user_id, $required_level);
-      if ($found !== null) {
-        $approvers[] = $found;
-      }
-    }
-    return array_values(array_unique(array_filter($approvers)));
-  }
-
-  /**
    * Sobe a cadeia de supervisores a partir de $user_id até encontrar
    * alguém com nível hierárquico <= $required_level.
    *

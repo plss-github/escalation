@@ -30,6 +30,12 @@ class PluginEscalationTemplate extends CommonDBTM {
         $DB->doQuery("ALTER TABLE `" . self::getTable() . "` DROP COLUMN `documents_id`");
       }
     }
+
+    // Coluna padrão da listagem: prévia do conteúdo
+    if (countElementsInTable('glpi_displaypreferences', ['itemtype' => self::class, 'users_id' => 0]) === 0) {
+      $dp = new DisplayPreference();
+      $dp->add(['itemtype' => self::class, 'num' => 2, 'rank' => 1, 'users_id' => 0]);
+    }
   }
 
   static function uninstall() { global $DB; $DB->dropTable(self::getTable()); return true; }

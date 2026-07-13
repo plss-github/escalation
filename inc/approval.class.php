@@ -83,12 +83,18 @@ class PluginEscalationApproval extends CommonDBTM {
     if (!$step->getFromDB($ts->fields['plugin_escalation_steps_id'])) return false;
 
     if ($step->fields['type'] === PluginEscalationStep::TYPE_HIERARCHY) {
-      // Hierarquia: qualquer aprovador encontrado pode aprovar/reprovar (quórum min1)
-      $approvals  = self::countVotes($ticketstep_id, self::ACTION_APPROVE);
+      // Hierarquia usa quórum ALL: qualquer rejeição encerra; todos devem aprovar
       $rejections = self::countVotes($ticketstep_id, self::ACTION_REJECT);
-      if ($rejections > 0) return self::RESULT_REJECTED;
-      if ($approvals  > 0) return self::RESULT_APPROVED;
-      return false;
+      $approvals  = self::countVotes($ticketstep_id, self::ACTION_APPROVE);
+      $total      = self::countApprovers($ticketstep_id);
+      if ($rejections > 0) {
+        $ts->update(['id' => $ticketstep_id, 'status' => PluginEscalationTicketStep::STATUS_REJECTED, 'completed_at' => $_SESSION['glpi_currenttime']]);
+        PluginEscalationTicketFlow::rejectFlow($ts->fields['plugin_escalation_ticketflows_id']);
+      } elseif ($total > 0 && $approvals >= $total) {
+        $ts->update(['id' => $ticketstep_id, 'status' => PluginEscalationTicketStep::STATUS_APPROVED, 'completed_at' => $_SESSION['glpi_currenttime']]);
+        PluginEscalationTicketFlow::advanceFlow($ts->fields['plugin_escalation_ticketflows_id']);
+      }
+      return true;
     }
 
     // Avaliar quórum

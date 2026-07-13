@@ -41,6 +41,14 @@ class PluginEscalationFlow extends CommonDBTM {
       }
       // itilcategories_id foi movido para tabela de junção — veja hook.php
     }
+
+    // Colunas padrão da listagem: ativo, categorias (lista), timeout
+    if (countElementsInTable('glpi_displaypreferences', ['itemtype' => self::class, 'users_id' => 0]) === 0) {
+      $dp = new DisplayPreference();
+      foreach ([2 => 1, 5 => 2, 4 => 3] as $num => $rank) {
+        $dp->add(['itemtype' => self::class, 'num' => $num, 'rank' => $rank, 'users_id' => 0]);
+      }
+    }
   }
 
   static function uninstall() {
@@ -149,13 +157,14 @@ class PluginEscalationFlow extends CommonDBTM {
       'name' => __('Active'), 'datatype' => 'bool', 'massiveaction' => true,
     ];
     $tab[] = [
-      'id'         => '3',
-      'table'      => 'glpi_itilcategories',
-      'field'      => 'name',
-      'name'       => __('Categoria ITIL', 'escalation'),
-      'datatype'   => 'dropdown',
+      'id'            => '3',
+      'table'         => 'glpi_itilcategories',
+      'field'         => 'completename',
+      'name'          => __('Categorias ITIL', 'escalation'),
+      'datatype'      => 'dropdown',
       'massiveaction' => false,
-      'joinparams' => [
+      'forcegroupby'  => true,
+      'joinparams'    => [
         'beforejoin' => [
           'table'      => PluginEscalationFlowCategory::getTable(),
           'joinparams' => ['jointype' => 'child'],
@@ -165,6 +174,19 @@ class PluginEscalationFlow extends CommonDBTM {
     $tab[] = [
       'id' => '4', 'table' => $this->getTable(), 'field' => 'timeout_days',
       'name' => __('Reprovação automática global (dias)', 'escalation'), 'datatype' => 'number', 'massiveaction' => false,
+    ];
+    $tab[] = [
+      'id'          => '5',
+      'table'       => $this->getTable(),
+      'field'       => 'id',
+      'name'        => __('Categorias (lista)', 'escalation'),
+      'datatype'    => 'text',
+      'massiveaction' => false,
+      'nosearch'    => true,
+      'computation' => "(SELECT GROUP_CONCAT(DISTINCT `_ic`.`completename` ORDER BY `_ic`.`completename` SEPARATOR ', ')
+                         FROM `glpi_plugin_escalation_flowcategories` `_fc`
+                         JOIN `glpi_itilcategories` `_ic` ON `_ic`.`id` = `_fc`.`itilcategories_id`
+                         WHERE `_fc`.`plugin_escalation_flows_id` = `glpi_plugin_escalation_flows`.`id`)",
     ];
     return $tab;
   }
