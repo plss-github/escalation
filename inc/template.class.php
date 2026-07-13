@@ -134,8 +134,9 @@ class PluginEscalationTemplate extends CommonDBTM {
     echo "<tr class='tab_bg_1'>";
     echo "<td>" . __('Conteúdo', 'escalation') . "</td>";
     echo "<td colspan='3'>";
+    $content_rand = mt_rand();
     Html::textarea(['name' => 'content', 'value' => $this->fields['content'] ?? '',
-                    'enable_richtext' => true, 'cols' => 100, 'rows' => 10]);
+                    'enable_richtext' => true, 'rand' => $content_rand, 'cols' => 100, 'rows' => 10]);
     echo "</td>";
     echo "</tr>";
 

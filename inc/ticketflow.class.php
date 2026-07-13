@@ -11,6 +11,17 @@ if (!defined('GLPI_ROOT')) {
 class PluginEscalationTicketFlow extends CommonDBTM {
   static $rightname = 'config';
 
+  static function addDebugFollowup(int $ticket_id, string $content): void {
+    if (isset($_SESSION['glpi_use_mode']) && $_SESSION['glpi_use_mode'] == Session::DEBUG_MODE) {
+      $fup = new ITILFollowup();
+      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket_id, 'content' => $content, 'is_private' => 1]);
+    }
+  }
+
+  private static function isGlpi10(): bool {
+    return version_compare(GLPI_VERSION, '11', '<');
+  }
+
   const STATUS_PENDING    = 0;
   const STATUS_APPROVED   = 1;
   const STATUS_REJECTED   = 2;
@@ -245,14 +256,9 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     ], ['id' => $ticketstep_id]);
 
     if (empty($step_data['generate_immediately'])) {
-      // Aguarda submissão de solução do chamado para gerar as aprovações
-      $fup = new ITILFollowup();
-      $fup->add([
-        'itemtype'   => 'Ticket',
-        'items_id'   => $ticket->getID(),
-        'content'    => sprintf(__('⏳ Etapa "%s" aguardando submissão de solução do chamado.', 'escalation'), $step_data['name'] ?? ''),
-        'is_private' => 1,
-      ]);
+      self::addDebugFollowup($ticket->getID(),
+        sprintf(__('⏳ Etapa "%s" aguardando submissão de solução do chamado.', 'escalation'), $step_data['name'] ?? '')
+      );
       return;
     }
 
@@ -284,10 +290,19 @@ class PluginEscalationTicketFlow extends CommonDBTM {
             }
           }
         }
-        if (empty($approvers)) $skip = true;
+          if (empty($approvers)) $skip = true;
       } else {
-        // Nível fixo: parte dos responsáveis atribuídos
-        $approvers = self::resolveHierarchyApprovers($ticket, (int) ($step_data['hierarchy_level'] ?? 1));
+        // Nível fixo: parte do requerente e sobe via supervisor até o nível alvo
+        $target_level = (int) ($step_data['hierarchy_level'] ?? 1);
+        $requesters   = self::getTicketActors($ticket->getID(), CommonITILActor::REQUESTER);
+        foreach ($requesters as $req_id) {
+          $found = self::traverseHierarchy((int) $req_id, $target_level);
+          if ($found !== null) {
+            $approvers[] = $found;
+          }
+        }
+        $approvers = array_values(array_unique(array_filter($approvers)));
+        if (empty($approvers)) $skip = true;
       }
     } else {
       // PEOPLE: fontes configuradas (usuários específicos, solicitantes, responsáveis, observadores)
@@ -309,14 +324,23 @@ class PluginEscalationTicketFlow extends CommonDBTM {
           $tmpl_doc_ids = PluginEscalationTemplate::getDocuments($tmpl_id);
         }
       }
+      $glpi10 = self::isGlpi10();
       foreach ($approvers as $user_id) {
         $validation = new TicketValidation();
-        $validation->add([
-          'tickets_id'         => $ticket->getID(),
-          'itemtype_target'    => 'User',
-          'items_id_target'    => (int) $user_id,
-          'comment_submission' => $submission_content,
-        ]);
+        $val_data = ['tickets_id' => $ticket->getID(), 'comment_submission' => $submission_content];
+        if ($glpi10) {
+          $val_data['users_id_validate'] = (int) $user_id;
+        } else {
+          $val_data['itemtype_target'] = 'User';
+          $val_data['items_id_target'] = (int) $user_id;
+        }
+        $validation->add($val_data);
+        // Registra o aprovador na etapa para controle de quórum
+        $DB->doQuery(sprintf(
+          "INSERT IGNORE INTO `glpi_plugin_escalation_ticketstepapprovers`
+           (`plugin_escalation_ticketsteps_id`, `users_id`) VALUES (%d, %d)",
+          (int) $ticketstep_id, (int) $user_id
+        ));
       }
       foreach ($tmpl_doc_ids as $doc_id) {
         $doc_item = new Document_Item();
@@ -329,13 +353,12 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       }
     }
 
-    // Followup + auto-avanço quando não há aprovadores
+    // Auto-avanço quando não há aprovadores
     if ($skip || empty($approvers)) {
       $content = $skip
         ? sprintf(__('⚡ Etapa "%s" ignorada — sem aprovador hierárquico definido.', 'escalation'), $step_name)
         : sprintf(__('⚡ Etapa "%s" aprovada automaticamente (sem aprovadores configurados).', 'escalation'), $step_name);
-      $fup = new ITILFollowup();
-      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket->getID(), 'content' => $content, 'is_private' => 1]);
+      self::addDebugFollowup($ticket->getID(), $content);
 
       $DB->update(PluginEscalationTicketStep::getTable(), [
         'status'       => PluginEscalationTicketStep::STATUS_APPROVED,
@@ -345,21 +368,17 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       $ts->getFromDB($ticketstep_id);
       self::advanceFlow($ts->fields['plugin_escalation_ticketflows_id']);
     } else {
-      $user_names = [];
-      foreach ($approvers as $uid) {
-        $u = new User();
-        if ($u->getFromDB($uid)) $user_names[] = $u->getFriendlyName();
-      }
-      $fup = new ITILFollowup();
-      $fup->add([
-        'itemtype'   => 'Ticket',
-        'items_id'   => $ticket->getID(),
-        'content'    => sprintf(
+      if (isset($_SESSION['glpi_use_mode']) && $_SESSION['glpi_use_mode'] == Session::DEBUG_MODE) {
+        $user_names = [];
+        foreach ($approvers as $uid) {
+          $u = new User();
+          if ($u->getFromDB($uid)) $user_names[] = $u->getFriendlyName();
+        }
+        self::addDebugFollowup($ticket->getID(), sprintf(
           __('⚡ Etapa "%s": aprovação gerada. Aguardando validação de: %s.', 'escalation'),
           $step_name, implode(', ', $user_names)
-        ),
-        'is_private' => 1,
-      ]);
+        ));
+      }
     }
   }
 
@@ -432,20 +451,70 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       return;
     }
 
-    // Verificar se ainda há validações aguardando no chamado
-    $pending = count($DB->request([
-      'FROM'  => TicketValidation::getTable(),
-      'WHERE' => ['tickets_id' => $ticket_id, 'status' => $waiting],
-    ]));
+    // Carregar aprovadores registrados para esta etapa
+    $approver_rows = $DB->request([
+      'SELECT' => ['users_id'],
+      'FROM'   => 'glpi_plugin_escalation_ticketstepapprovers',
+      'WHERE'  => ['plugin_escalation_ticketsteps_id' => $current_ts['id']],
+    ]);
+    $step_approver_ids = array_column(iterator_to_array($approver_rows), 'users_id');
 
-    if ($pending === 0) {
-      // Todas as validações desta etapa foram aprovadas
-      $DB->update(PluginEscalationTicketStep::getTable(), [
-        'status'       => PluginEscalationTicketStep::STATUS_APPROVED,
-        'completed_at' => $_SESSION['glpi_currenttime'],
-      ], ['id' => $current_ts['id']]);
-      self::advanceFlow($tf_row['id']);
+    $glpi10 = self::isGlpi10();
+
+    // Sem registro de aprovadores → fallback: aguardar pending=0 no chamado (comportamento anterior)
+    if (empty($step_approver_ids)) {
+      $pending = count($DB->request([
+        'FROM'  => TicketValidation::getTable(),
+        'WHERE' => ['tickets_id' => $ticket_id, 'status' => $waiting],
+      ]));
+      if ($pending > 0) return;
+    } else {
+      // Contar quantos aprovadores desta etapa já aprovaram
+      $approved_where = ['tickets_id' => $ticket_id, 'status' => $accepted];
+      if ($glpi10) {
+        $approved_where['users_id_validate'] = $step_approver_ids;
+      } else {
+        $approved_where['itemtype_target'] = 'User';
+        $approved_where['items_id_target'] = $step_approver_ids;
+      }
+      $approved_count = count($DB->request(['FROM' => TicketValidation::getTable(), 'WHERE' => $approved_where]));
+      $total = count($step_approver_ids);
+
+      $quorum = $step_def->fields['quorum_type'] ?? PluginEscalationStep::QUORUM_ALL;
+      // Hierarquia sempre usa all; people respeita o quórum configurado
+      if ($step_def->fields['type'] === PluginEscalationStep::TYPE_HIERARCHY) {
+        $quorum = PluginEscalationStep::QUORUM_ALL;
+      }
+
+      if ($quorum === PluginEscalationStep::QUORUM_MIN1) {
+        $reached = $approved_count >= 1;
+      } elseif ($quorum === PluginEscalationStep::QUORUM_MAJORITY) {
+        $reached = $approved_count > ($total / 2);
+      } else {
+        $reached = $approved_count >= $total;
+      }
+
+      if (!$reached) return;
+
+      // Quórum atingido: cancelar validações ainda pendentes dos demais aprovadores
+      if ($quorum !== PluginEscalationStep::QUORUM_ALL) {
+        $pending_where = ['tickets_id' => $ticket_id, 'status' => $waiting];
+        if ($glpi10) {
+          $pending_where['users_id_validate'] = $step_approver_ids;
+        } else {
+          $pending_where['itemtype_target'] = 'User';
+          $pending_where['items_id_target'] = $step_approver_ids;
+        }
+        $DB->update(TicketValidation::getTable(), ['status' => CommonITILValidation::ACCEPTED], $pending_where);
+      }
     }
+
+    // Etapa aprovada pelo quórum
+    $DB->update(PluginEscalationTicketStep::getTable(), [
+      'status'       => PluginEscalationTicketStep::STATUS_APPROVED,
+      'completed_at' => $_SESSION['glpi_currenttime'],
+    ], ['id' => $current_ts['id']]);
+    self::advanceFlow($tf_row['id']);
   }
 
   static function resolveApprovers(array $step_data, Ticket $ticket): array {

@@ -368,7 +368,7 @@ class PluginEscalationStep extends CommonDBTM {
       'min'   => '0',
       'style' => 'width:80px',
     ]);
-    echo "<div class='text-muted small mt-1'>" . __('0 = desativado', 'escalation') . "</div>";
+    echo "<div class='text-muted mt-1' style='font-size:85%'>" . __('0 = desativado', 'escalation') . "</div>";
     echo "</td>";
     echo "</tr>";
 
@@ -380,7 +380,7 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<tr class='tab_bg_1'>";
     echo "<td>" . __('Modelo de validação', 'escalation') . "</td>";
     echo "<td colspan='3'>";
-    $fid_esc = htmlescape($tmpl_fid);
+    $fid_esc = htmlspecialchars($tmpl_fid, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     echo "<style>
       #{$fid_esc} ~ .select2-container { flex:1; min-width:0; }
       #{$fid_esc} ~ .select2-container .select2-selection.select2-selection--single { width:100% !important; max-width:none !important; }
@@ -396,7 +396,7 @@ class PluginEscalationStep extends CommonDBTM {
     ]);
     echo Ajax::createIframeModalWindow($tmpl_modal, PluginEscalationTemplate::getFormURL(), ['display' => false]);
     echo "<div class='btn btn-outline-secondary' data-bs-toggle='modal'"
-       . " data-bs-target='#" . htmlescape($tmpl_modal) . "'"
+       . " data-bs-target='#" . htmlspecialchars($tmpl_modal, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "'"
        . " title='" . __s('Criar modelo', 'escalation') . "'>"
        . "<span data-bs-toggle='tooltip'><i class='ti ti-plus'></i></span>"
        . "</div>";
@@ -434,7 +434,7 @@ class PluginEscalationStep extends CommonDBTM {
     echo "<td colspan='3'>";
     Html::textarea(['name' => 'content', 'value' => $cur_content ?? '',
                 'enable_richtext' => true, 'cols' => 100, 'rows' => 10]);
-    echo "<div class='text-muted small mt-1'>"
+    echo "<div class='text-muted mt-1' style='font-size:85%'>"
        . __('Mensagem enviada aos aprovadores. Deixe vazio para não enviar mensagem.', 'escalation')
        . "</div>";
     echo "</td>";
@@ -473,7 +473,7 @@ class PluginEscalationStep extends CommonDBTM {
       'min'   => '1',
       'style' => 'width:80px',
     ]);
-    echo "<div class='text-muted small mt-1'>" . __('1 = nível mais alto da hierarquia', 'escalation') . "</div>";
+    echo "<div class='text-muted mt-1' style='font-size:85%'>" . __('1 = nível mais alto da hierarquia', 'escalation') . "</div>";
     echo "</td>";
     echo "</tr>";
 

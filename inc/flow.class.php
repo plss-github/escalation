@@ -213,7 +213,7 @@ class PluginEscalationFlow extends CommonDBTM {
     if ($can_add) {
       echo Ajax::createIframeModalWindow($cat_modal, ITILCategory::getFormURL(), ['display' => false]);
       echo "<div class='btn btn-outline-secondary' data-bs-toggle='modal'"
-         . " data-bs-target='#" . htmlescape($cat_modal) . "'"
+         . " data-bs-target='#" . htmlspecialchars($cat_modal, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "'"
          . " title='" . __s('Add') . "'>"
          . "<span data-bs-toggle='tooltip'><i class='ti ti-plus'></i></span>"
          . "</div>";
