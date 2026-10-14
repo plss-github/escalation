@@ -505,7 +505,16 @@ class PluginEscalationTicketFlow extends CommonDBTM {
           $pending_where['itemtype_target'] = 'User';
           $pending_where['items_id_target'] = $step_approver_ids;
         }
-        $DB->update(TicketValidation::getTable(), ['status' => CommonITILValidation::ACCEPTED], $pending_where);
+        // SELECT (sem lock) + UPDATE por PK: um UPDATE direto com esse WHERE usa index merge
+        // (tickets_id ∩ status) e trava todas as validações pendentes da base → deadlocks.
+        $pending_ids = array_column(iterator_to_array($DB->request([
+          'SELECT' => ['id'],
+          'FROM'   => TicketValidation::getTable(),
+          'WHERE'  => $pending_where,
+        ])), 'id');
+        if (!empty($pending_ids)) {
+          $DB->update(TicketValidation::getTable(), ['status' => CommonITILValidation::ACCEPTED], ['id' => $pending_ids]);
+        }
       }
     }
 
