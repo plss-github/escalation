@@ -38,8 +38,29 @@ class PluginEscalationConfig extends CommonGLPI {
     ];
   }
 
+  /** @var array|null Cache por requisição (a hierarquia consulta a config a cada nível percorrido). */
+  private static ?array $config_cache = null;
+
   static function getConfig(): array {
-    return Config::getConfigurationValues('plugin_escalation', array_keys(self::getDefaults()));
+    if (self::$config_cache === null) {
+      self::$config_cache = Config::getConfigurationValues('plugin_escalation', array_keys(self::getDefaults()));
+    }
+    return self::$config_cache;
+  }
+
+  /**
+   * Caminho web do plugin. No GLPI 11 os recursos de plugins são servidos em
+   * /plugins/<key> e Plugin::getWebDir() está deprecated; no GLPI 10 ele ainda
+   * é necessário (o plugin pode estar em /marketplace).
+   *
+   * @param bool $full true para incluir o root_doc
+   */
+  static function getWebPath(bool $full = true): string {
+    global $CFG_GLPI;
+    if (version_compare(GLPI_VERSION, '11', '<')) {
+      return (string) Plugin::getWebDir('escalation', $full);
+    }
+    return ($full ? $CFG_GLPI['root_doc'] : '') . '/plugins/escalation';
   }
 
   static function setDefaults(): void {
@@ -67,7 +88,7 @@ class PluginEscalationConfig extends CommonGLPI {
   static function showForm(): void {
     $config       = self::getConfig();
     $hier_type    = $config['hierarchy_type'] ?? 'Group';
-    $form_url     = Plugin::getWebDir('escalation') . '/front/config.form.php';
+    $form_url     = PluginEscalationConfig::getWebPath() . '/front/config.form.php';
     $levels       = PluginEscalationHierarchyLevel::getAllLevels();
 
     // ------------------------------------------------------------------

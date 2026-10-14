@@ -10,7 +10,8 @@ $ticketstep_id = (int) ($_POST['ticketstep_id'] ?? $_GET['ticketstep_id'] ?? 0);
 $users_id      = (int) Session::getLoginUserID();
 
 if (isset($_POST['approve']) || isset($_POST['reject'])) {
-  Session::checkCSRF($_POST);
+  // CSRF já é validado pelo GLPI (kernel no 11; includes.php no 10 para plugins
+  // csrf_compliant). Uma segunda verificação aqui falha, pois o token já foi consumido.
 
   $action  = isset($_POST['approve']) ? PluginEscalationApproval::ACTION_APPROVE : PluginEscalationApproval::ACTION_REJECT;
   $comment = Toolbox::cleanNewLines($_POST['comment'] ?? '');
@@ -52,7 +53,7 @@ echo "<p><b>" . __('Chamado', 'escalation') . ":</b> ";
 echo "<a href='" . Ticket::getFormURLWithID($ticket->getID()) . "'>#" . $ticket->getID() . " — " . htmlspecialchars($ticket->fields['name']) . "</a></p>";
 echo "<p><b>" . __('Etapa', 'escalation') . ":</b> " . htmlspecialchars($step->fields['name']) . "</p>";
 
-echo "<form method='post' action='" . Plugin::getWebDir('escalation') . "/front/approval.form.php'>";
+echo "<form method='post' action='" . PluginEscalationConfig::getWebPath() . "/front/approval.form.php'>";
 echo "<input type='hidden' name='ticketstep_id' value='$ticketstep_id'>";
 echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
 echo "<div style='margin:16px 0'>";

@@ -108,7 +108,7 @@ class PluginEscalationFlow extends CommonDBTM {
 
   static function getMenuContent() {
     if (!static::canView()) return false;
-    $p = Plugin::getWebDir('escalation', false);
+    $p = PluginEscalationConfig::getWebPath(false);
     $lbl_flows = self::getTypeName(2);
     $lbl_tmpls = _n('Modelo', 'Modelos', 2, 'escalation');
     $menu = [
@@ -336,8 +336,12 @@ class PluginEscalationFlow extends CommonDBTM {
   }
 
   static function ticketUpdate(Ticket $ticket): void {
+    // `oldvalues` só traz `status` quando o status mudou nesta atualização; sem essa
+    // checagem, qualquer update de um chamado já solucionado (ex.: o próprio GLPI
+    // atualizando a validação global) era tratado como "acabou de ser solucionado".
+    if (!array_key_exists('status', $ticket->oldvalues ?? [])) return;
     $new_status = (int) ($ticket->fields['status'] ?? 0);
-    $old_status = (int) ($ticket->oldvalues['status'] ?? -1);
+    $old_status = (int) $ticket->oldvalues['status'];
     // Quando chamado vai para "Solucionado", ativa etapas com generate_immediately = 0
     if ($new_status === Ticket::SOLVED && $old_status !== Ticket::SOLVED) {
       PluginEscalationTicketFlow::ticketSolved($ticket);

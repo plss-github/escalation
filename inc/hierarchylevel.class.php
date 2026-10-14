@@ -30,8 +30,13 @@ class PluginEscalationHierarchyLevel extends CommonDBTM {
         `itemtype` varchar(50) COLLATE {$default_collation} NOT NULL DEFAULT 'Group',
         PRIMARY KEY (`id`),
         UNIQUE KEY `level_item` (`level`, `items_id`, `itemtype`),
-        KEY `level` (`level`)
+        KEY `level` (`level`),
+        KEY `item` (`items_id`, `itemtype`)
       ) ENGINE=InnoDB DEFAULT CHARSET={$default_charset} COLLATE={$default_collation};");
+    } else {
+      // Busca do nível por grupo/categoria (getLevelForItem / getUserLevelByGroup)
+      // não usa `level_item`, que começa por `level`.
+      $migration->addKey(self::getTable(), ['items_id', 'itemtype'], 'item');
     }
   }
 

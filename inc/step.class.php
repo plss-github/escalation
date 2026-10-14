@@ -403,7 +403,7 @@ class PluginEscalationStep extends CommonDBTM {
     echo "</div>";
     $fid_js   = json_encode($tmpl_fid);
     $mid_js   = json_encode($tmpl_modal);
-    $ajax_url = json_encode(Plugin::getWebDir('escalation') . '/ajax/templates.php');
+    $ajax_url = json_encode(PluginEscalationConfig::getWebPath() . '/ajax/templates.php');
     echo Html::scriptBlock("
       \$(function() {
         document.getElementById({$mid_js})?.addEventListener('hidden.bs.modal', function() {

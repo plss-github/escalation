@@ -156,37 +156,23 @@ class PluginEscalationApproval extends CommonDBTM {
   // -------------------------------------------------------------------------
 
   static function isAuthorizedApprover(int $ticketstep_id, int $users_id): bool {
-    global $DB;
-    $row = $DB->request([
-      'FROM'  => 'glpi_plugin_escalation_ticketstepapprovers',
-      'WHERE' => ['plugin_escalation_ticketsteps_id' => $ticketstep_id, 'users_id' => $users_id],
-    ]);
-    return count($row) > 0;
+    return countElementsInTable('glpi_plugin_escalation_ticketstepapprovers', [
+      'plugin_escalation_ticketsteps_id' => $ticketstep_id, 'users_id' => $users_id,
+    ]) > 0;
   }
 
   static function hasUserVoted(int $ticketstep_id, int $users_id): bool {
-    global $DB;
-    $row = $DB->request([
-      'FROM'  => self::getTable(),
-      'WHERE' => ['plugin_escalation_ticketsteps_id' => $ticketstep_id, 'users_id' => $users_id],
-    ]);
-    return count($row) > 0;
+    return countElementsInTable(self::getTable(), [
+      'plugin_escalation_ticketsteps_id' => $ticketstep_id, 'users_id' => $users_id,
+    ]) > 0;
   }
 
   static function countApprovers(int $ticketstep_id): int {
-    global $DB;
-    return count($DB->request([
-      'FROM'  => 'glpi_plugin_escalation_ticketstepapprovers',
-      'WHERE' => ['plugin_escalation_ticketsteps_id' => $ticketstep_id],
-    ]));
+    return countElementsInTable('glpi_plugin_escalation_ticketstepapprovers', ['plugin_escalation_ticketsteps_id' => $ticketstep_id]);
   }
 
   static function countVotes(int $ticketstep_id, int $action): int {
-    global $DB;
-    return count($DB->request([
-      'FROM'  => self::getTable(),
-      'WHERE' => ['plugin_escalation_ticketsteps_id' => $ticketstep_id, 'action' => $action],
-    ]));
+    return countElementsInTable(self::getTable(), ['plugin_escalation_ticketsteps_id' => $ticketstep_id, 'action' => $action]);
   }
 
   static function getVotesForStep(int $ticketstep_id): array {

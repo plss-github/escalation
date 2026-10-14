@@ -84,11 +84,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   }
 
   static function countActiveFlows(int $ticket_id): int {
-    global $DB;
-    return count($DB->request([
-      'FROM'  => self::getTable(),
-      'WHERE' => ['tickets_id' => $ticket_id],
-    ]));
+    return countElementsInTable(self::getTable(), ['tickets_id' => $ticket_id]);
   }
 
   // -------------------------------------------------------------------------
@@ -105,11 +101,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     $ticket_id = $ticket->getID();
 
     // Verificar se já existe um fluxo ativo para este flow_id neste chamado
-    $existing = $DB->request([
-      'FROM'  => self::getTable(),
-      'WHERE' => ['tickets_id' => $ticket_id, 'plugin_escalation_flows_id' => $flow_id],
-    ]);
-    if (count($existing) > 0) return;
+    if (countElementsInTable(self::getTable(), ['tickets_id' => $ticket_id, 'plugin_escalation_flows_id' => $flow_id]) > 0) return;
 
     // Verificar se o fluxo tem etapas
     $steps = $DB->request([
@@ -463,10 +455,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
 
     // Sem registro de aprovadores → fallback: aguardar pending=0 no chamado (comportamento anterior)
     if (empty($step_approver_ids)) {
-      $pending = count($DB->request([
-        'FROM'  => TicketValidation::getTable(),
-        'WHERE' => ['tickets_id' => $ticket_id, 'status' => $waiting],
-      ]));
+      $pending = countElementsInTable(TicketValidation::getTable(), ['tickets_id' => $ticket_id, 'status' => $waiting]);
       if ($pending > 0) return;
     } else {
       // Contar quantos aprovadores desta etapa já aprovaram
@@ -477,7 +466,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         $approved_where['itemtype_target'] = 'User';
         $approved_where['items_id_target'] = $step_approver_ids;
       }
-      $approved_count = count($DB->request(['FROM' => TicketValidation::getTable(), 'WHERE' => $approved_where]));
+      $approved_count = countElementsInTable(TicketValidation::getTable(), $approved_where);
       $total = count($step_approver_ids);
 
       $quorum = $step_def->fields['quorum_type'] ?? PluginEscalationStep::QUORUM_ALL;
@@ -605,6 +594,27 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   // UI da aba "Aprovação" no chamado
   // -------------------------------------------------------------------------
 
+  /**
+   * Nomes de exibição de vários usuários em uma única consulta.
+   *
+   * @param int[] $user_ids
+   * @return array<int, string> users_id => nome
+   */
+  private static function getUserNames(array $user_ids): array {
+    global $DB;
+    $user_ids = array_values(array_unique(array_filter(array_map('intval', $user_ids))));
+    if (empty($user_ids)) return [];
+    $names = [];
+    foreach ($DB->request([
+      'SELECT' => ['id', 'name', 'realname', 'firstname'],
+      'FROM'   => User::getTable(),
+      'WHERE'  => ['id' => $user_ids],
+    ]) as $row) {
+      $names[(int) $row['id']] = formatUserName($row['id'], $row['name'], $row['realname'], $row['firstname']);
+    }
+    return $names;
+  }
+
   static function showApprovalTab(Ticket $ticket): void {
     global $DB;
 
@@ -664,9 +674,9 @@ class PluginEscalationTicketFlow extends CommonDBTM {
 
         // Mostrar votações existentes
         $votes = PluginEscalationApproval::getVotesForStep($ts['id']);
+        $voter_names = self::getUserNames(array_column($votes, 'users_id'));
         foreach ($votes as $v) {
-          $u = new User();
-          $uname = $u->getFromDB($v['users_id']) ? $u->getFriendlyName() : '#' . $v['users_id'];
+          $uname = $voter_names[(int) $v['users_id']] ?? '#' . $v['users_id'];
           $icon  = $v['action'] == PluginEscalationApproval::ACTION_APPROVE ? '✅' : '❌';
           echo "<small>$icon " . htmlspecialchars($uname) . "</small><br>";
         }
@@ -676,7 +686,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
           && PluginEscalationApproval::isAuthorizedApprover($ts['id'], $current_user_id)
           && !PluginEscalationApproval::hasUserVoted($ts['id'], $current_user_id)
         ) {
-          echo "<form method='post' action='" . Plugin::getWebDir('escalation') . "/front/approval.form.php'>";
+          echo "<form method='post' action='" . PluginEscalationConfig::getWebPath() . "/front/approval.form.php'>";
           echo "<input type='hidden' name='ticketstep_id' value='" . $ts['id'] . "'>";
           echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
           echo "<textarea name='comment' rows='2' style='width:100%;margin:4px 0' placeholder='" . __('Comentário (opcional)', 'escalation') . "'></textarea>";
@@ -711,10 +721,28 @@ class PluginEscalationTicketFlow extends CommonDBTM {
    * Executa a verificação de timeouts.
    * Retorno: 1 = processou itens, 0 = nada a fazer, -1 = erro.
    */
+  /** Máximo de itens expirados processados por execução (o restante fica para a próxima). */
+  const CRON_BATCH_SIZE = 50;
+
+  /**
+   * Condição SQL "started_at + timeout_days dias <= agora", com a mesma
+   * referência de hora usada pelo PHP (GLPI 10: QueryExpression global; 11: namespaced).
+   */
+  private static function expiredCriteria(string $started_col, string $days_col): array {
+    global $DB;
+    $now   = date('Y-m-d H:i:s');
+    $class = class_exists('Glpi\\DBAL\\QueryExpression') ? 'Glpi\\DBAL\\QueryExpression' : 'QueryExpression';
+    return [new $class(sprintf(
+      'DATE_ADD(%s, INTERVAL %s DAY) <= %s',
+      $DB->quoteName($started_col),
+      $DB->quoteName($days_col),
+      $DB->quoteValue($now)
+    ))];
+  }
+
   static function cronChecktimeouts(CronTask $task): int {
     global $DB;
 
-    $now     = time();
     $volume  = 0;
 
     // ------------------------------------------------------------------
@@ -734,16 +762,16 @@ class PluginEscalationTicketFlow extends CommonDBTM {
           'ON' => ['ts' => 'plugin_escalation_steps_id', 's' => 'id'],
         ],
       ],
-      'WHERE'      => [
+      'WHERE'      => array_merge([
         'ts.status' => PluginEscalationTicketStep::STATUS_PENDING,
         ['s.timeout_days' => ['>', 0]],
-        ['ts.started_at'   => ['!=', null]],
-      ],
+        ['NOT' => ['ts.started_at' => null]],
+      ], self::expiredCriteria('ts.started_at', 's.timeout_days')),
+      'ORDERBY'    => ['ts.started_at ASC'],
+      'LIMIT'      => self::CRON_BATCH_SIZE,
     ]);
 
     foreach ($step_iterator as $row) {
-      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_days'] * 86400);
-      if ($expire_at > $now) continue;
 
       // Marcar etapa como expirada
       $ts_obj = new PluginEscalationTicketStep();
@@ -782,16 +810,16 @@ class PluginEscalationTicketFlow extends CommonDBTM {
           'ON' => ['tf' => 'plugin_escalation_flows_id', 'f' => 'id'],
         ],
       ],
-      'WHERE'      => [
+      'WHERE'      => array_merge([
         'tf.status'       => self::STATUS_PENDING,
         ['f.timeout_days' => ['>', 0]],
-        ['tf.started_at'   => ['!=', null]],
-      ],
+        ['NOT' => ['tf.started_at' => null]],
+      ], self::expiredCriteria('tf.started_at', 'f.timeout_days')),
+      'ORDERBY'    => ['tf.started_at ASC'],
+      'LIMIT'      => self::CRON_BATCH_SIZE,
     ]);
 
     foreach ($flow_iterator as $row) {
-      $expire_at = strtotime($row['started_at']) + ((int) $row['timeout_days'] * 86400);
-      if ($expire_at > $now) continue;
 
       // Marcar etapas WAITING/PENDING como expiradas antes de fechar o fluxo
       $DB->update(PluginEscalationTicketStep::getTable(), [
