@@ -656,8 +656,6 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         'ORDERBY' => ['s.step_order ASC'],
       ]);
 
-      $current_user_id = Session::getLoginUserID();
-
       foreach ($steps_data as $i => $ts) {
         $ts_status = $ts['status'];
         echo "<tr class='tab_bg_" . (($i % 2) + 1) . "'>";
@@ -672,27 +670,15 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         echo "</td>";
         echo "<td>";
 
-        // Mostrar votações existentes
+        // Votos registrados pela aba em versões anteriores (somente histórico).
+        // A aba é só de consulta: a aprovação é feita pelas validações nativas do GLPI,
+        // para que fluxo e validações nunca fiquem divergentes.
         $votes = PluginEscalationApproval::getVotesForStep($ts['id']);
         $voter_names = self::getUserNames(array_column($votes, 'users_id'));
         foreach ($votes as $v) {
           $uname = $voter_names[(int) $v['users_id']] ?? '#' . $v['users_id'];
           $icon  = $v['action'] == PluginEscalationApproval::ACTION_APPROVE ? '✅' : '❌';
           echo "<small>$icon " . htmlspecialchars($uname) . "</small><br>";
-        }
-
-        // Formulário de aprovação para o usuário atual (se for aprovador e etapa ativa)
-        if ($ts_status === PluginEscalationTicketStep::STATUS_PENDING
-          && PluginEscalationApproval::isAuthorizedApprover($ts['id'], $current_user_id)
-          && !PluginEscalationApproval::hasUserVoted($ts['id'], $current_user_id)
-        ) {
-          echo "<form method='post' action='" . PluginEscalationConfig::getWebPath() . "/front/approval.form.php'>";
-          echo "<input type='hidden' name='ticketstep_id' value='" . $ts['id'] . "'>";
-          echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-          echo "<textarea name='comment' rows='2' style='width:100%;margin:4px 0' placeholder='" . __('Comentário (opcional)', 'escalation') . "'></textarea>";
-          echo "<button name='approve' type='submit' class='vsubmit btn-sm' style='background:#22c55e;border-color:#22c55e;gap:4px'><i class='fas fa-check'></i> " . __('Aprovar', 'escalation') . "</button>&nbsp;";
-          echo "<button name='reject' type='submit' class='vsubmit btn-sm' style='background:#ef4444;border-color:#ef4444;gap:4px'><i class='fas fa-times'></i> " . __('Reprovar', 'escalation') . "</button>";
-          Html::closeForm();
         }
 
         echo "</td></tr>";
