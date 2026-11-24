@@ -42,11 +42,25 @@ class PluginEscalationFlow extends CommonDBTM {
       // itilcategories_id foi movido para tabela de junção — veja hook.php
     }
 
-    // Colunas padrão da listagem: ativo, categorias (lista), timeout
+    // Colunas padrão da listagem: ativo, categorias, timeout
     if (countElementsInTable('glpi_displaypreferences', ['itemtype' => self::class, 'users_id' => 0]) === 0) {
       $dp = new DisplayPreference();
-      foreach ([2 => 1, 5 => 2, 4 => 3] as $num => $rank) {
+      foreach ([2 => 1, 3 => 2, 4 => 3] as $num => $rank) {
         $dp->add(['itemtype' => self::class, 'num' => $num, 'rank' => $rank, 'users_id' => 0]);
+      }
+    }
+
+    // 1.3.0: a coluna 5 (texto truncado, sem pesquisa) foi removida; quem a exibia passa a ver a 3
+    $dp_table = DisplayPreference::getTable();
+    foreach ($DB->request(['FROM' => $dp_table, 'WHERE' => ['itemtype' => self::class, 'num' => 5]]) as $row) {
+      $same_view = ['itemtype' => self::class, 'users_id' => $row['users_id'], 'num' => 3];
+      if (array_key_exists('interface', $row)) {
+        $same_view['interface'] = $row['interface'];
+      }
+      if (countElementsInTable($dp_table, $same_view) > 0) {
+        $DB->delete($dp_table, ['id' => $row['id']]);
+      } else {
+        $DB->update($dp_table, ['num' => 3], ['id' => $row['id']]);
       }
     }
   }
@@ -156,6 +170,9 @@ class PluginEscalationFlow extends CommonDBTM {
       'id' => '2', 'table' => $this->getTable(), 'field' => 'is_active',
       'name' => __('Active'), 'datatype' => 'bool', 'massiveaction' => true,
     ];
+    // Lista completa (uma categoria por linha) e pesquisável por "contém".
+    // Substitui a antiga coluna 5 "Categorias (lista)", que era texto truncado
+    // pelo GLPI e não aceitava pesquisa.
     $tab[] = [
       'id'            => '3',
       'table'         => 'glpi_itilcategories',
@@ -174,19 +191,6 @@ class PluginEscalationFlow extends CommonDBTM {
     $tab[] = [
       'id' => '4', 'table' => $this->getTable(), 'field' => 'timeout_days',
       'name' => __('Reprovação automática global (dias)', 'escalation'), 'datatype' => 'number', 'massiveaction' => false,
-    ];
-    $tab[] = [
-      'id'          => '5',
-      'table'       => $this->getTable(),
-      'field'       => 'id',
-      'name'        => __('Categorias (lista)', 'escalation'),
-      'datatype'    => 'text',
-      'massiveaction' => false,
-      'nosearch'    => true,
-      'computation' => "(SELECT GROUP_CONCAT(DISTINCT `_ic`.`completename` ORDER BY `_ic`.`completename` SEPARATOR ', ')
-                         FROM `glpi_plugin_escalation_flowcategories` `_fc`
-                         JOIN `glpi_itilcategories` `_ic` ON `_ic`.`id` = `_fc`.`itilcategories_id`
-                         WHERE `_fc`.`plugin_escalation_flows_id` = `glpi_plugin_escalation_flows`.`id`)",
     ];
     return $tab;
   }
@@ -331,8 +335,34 @@ class PluginEscalationFlow extends CommonDBTM {
   }
 
   static function preTicketUpdate($ticket) {
-    // TODO: bloquear alterações de status enquanto o fluxo estiver pendente (opcional)
-    // Exemplo: impedir fechar o chamado enquanto aprovação não foi concluída
+    // Ao responder uma validação, o GLPI recalcula a aprovação global só com as
+    // validações já geradas: ao fim da 1ª etapa ela vira "Aprovada" mesmo com
+    // etapas seguintes por vir, e regras/notificações liberam o chamado antes da
+    // hora. Enquanto houver etapa aguardando resposta, mantém "Em espera".
+    if (!is_array($ticket->input ?? null) || empty($ticket->input['_from_itilvalidation'])) return;
+    if ((int) ($ticket->input['global_validation'] ?? -1) !== CommonITILValidation::ACCEPTED) return;
+    if (PluginEscalationTicketFlow::isAwaitingApproval((int) $ticket->getID())) {
+      $ticket->input['global_validation'] = CommonITILValidation::WAITING;
+    }
+  }
+
+  /**
+   * Depois das regras de negócio: uma resposta de aprovação em chamado com fluxo
+   * já solucionado/fechado (aprovação gerada na solução) não pode mudar o status.
+   * Regras do tipo "aprovação em espera → Pendente" / "aceita → Novo" disparam
+   * nessa atualização e tirariam o chamado de Solucionado. Na atualização o GLPI
+   * só passa às regras os campos alterados, então um critério "Status ≠
+   * Solucionado" na regra não resolve.
+   */
+  static function postPrepareTicketUpdate($ticket) {
+    if (!is_array($ticket->input ?? null) || empty($ticket->input['_from_itilvalidation'])) return;
+    // Status decidido pelo próprio plugin passa; status posto por regra nessa atualização, não
+    if (!empty($ticket->input['_escalation_status']) || !array_key_exists('status', $ticket->input)) return;
+    if (!PluginEscalationTicketFlow::managesTicketStatus()) return;
+    $done = array_merge(Ticket::getSolvedStatusArray(), Ticket::getClosedStatusArray());
+    if (!in_array((int) ($ticket->fields['status'] ?? 0), $done)) return;
+    if (PluginEscalationTicketFlow::countActiveFlows((int) $ticket->getID()) === 0) return;
+    unset($ticket->input['status']);
   }
 
   static function ticketUpdate(Ticket $ticket): void {

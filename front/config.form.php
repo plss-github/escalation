@@ -9,7 +9,9 @@ $action = $_POST['_action'] ?? '';
 // ---- Salvar configurações gerais ------------------------------------------
 if ($action === 'save_config' && isset($_POST['update'])) {
   Config::setConfigurationValues('plugin_escalation', [
-    'hierarchy_type' => $_POST['hierarchy_type'] ?? 'Group',
+    'hierarchy_type'           => in_array($_POST['hierarchy_type'] ?? '', ['Group', 'UserCategory'], true) ? $_POST['hierarchy_type'] : 'Group',
+    'manage_ticket_status'     => !empty($_POST['manage_ticket_status']) ? '1' : '0',
+    'refused_solutiontypes_id' => (string) max(0, (int) ($_POST['refused_solutiontypes_id'] ?? 0)),
   ]);
   Session::addMessageAfterRedirect(__('Configurações salvas.', 'escalation'));
   Html::back();

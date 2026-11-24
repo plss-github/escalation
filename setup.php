@@ -1,6 +1,6 @@
 <?php
 
-define('PLUGIN_ESCALATION_VERSION', '1.2.0');
+define('PLUGIN_ESCALATION_VERSION', '1.3.0');
 
 define('PLUGIN_ESCALATION_MIN_GLPI', '10.0.0');
 // define('PLUGIN_ESCALATION_MAX_GLPI', '11.0.99');
@@ -19,6 +19,7 @@ function plugin_init_escalation() {
 
   $PLUGIN_HOOKS['item_add']['escalation']        = ['Ticket' => ['PluginEscalationFlow', 'ticketAdd']];
   $PLUGIN_HOOKS['pre_item_update']['escalation'] = ['Ticket' => ['PluginEscalationFlow', 'preTicketUpdate']];
+  $PLUGIN_HOOKS['post_prepareupdate']['escalation'] = ['Ticket' => ['PluginEscalationFlow', 'postPrepareTicketUpdate']];
   $PLUGIN_HOOKS['item_update']['escalation']     = [
     'Ticket'           => ['PluginEscalationFlow', 'ticketUpdate'],
     'TicketValidation' => ['PluginEscalationTicketFlow', 'validationUpdated'],

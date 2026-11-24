@@ -14,7 +14,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
   static function addDebugFollowup(int $ticket_id, string $content): void {
     if (isset($_SESSION['glpi_use_mode']) && $_SESSION['glpi_use_mode'] == Session::DEBUG_MODE) {
       $fup = new ITILFollowup();
-      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket_id, 'content' => $content, 'is_private' => 1]);
+      $fup->add(['itemtype' => 'Ticket', 'items_id' => $ticket_id, 'content' => $content, 'is_private' => 1, '_no_reopen' => true]);
     }
   }
 
@@ -143,6 +143,9 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     if ($first_ts) {
       self::activateStep($first_ts['id'], $ticket, $first_step_data);
     }
+
+    // Chamado aguardando aprovação fica PENDENTE
+    self::syncTicketState($ticket_id, false);
   }
 
   /**
@@ -213,7 +216,179 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     }
 
     $fup = new ITILFollowup();
-    $fup->add(['itemtype' => 'Ticket', 'items_id' => $tf->fields['tickets_id'], 'content' => $msg, 'is_private' => 0]);
+    // Acompanhamento automático: não pode reabrir chamado solucionado (sessão pode ser a do requerente)
+    $fup->add(['itemtype' => 'Ticket', 'items_id' => $tf->fields['tickets_id'], 'content' => $msg, 'is_private' => 0, '_no_reopen' => true]);
+
+    // Aprovado: sai de PENDENTE para NOVO. Reprovado/expirado: solucionado como cancelado.
+    if ($final_status !== self::STATUS_APPROVED) {
+      $reason = $final_status === self::STATUS_TIMED_OUT
+        ? sprintf(__('Chamado cancelado: o fluxo de aprovação "%s" atingiu o prazo de reprovação automática.', 'escalation'), $flow_name)
+        : sprintf(__('Chamado cancelado: aprovação reprovada no fluxo "%s".', 'escalation'), $flow_name);
+      self::cancelTicket((int) $tf->fields['tickets_id'], $reason);
+    }
+    self::syncTicketState((int) $tf->fields['tickets_id'], true);
+  }
+
+  // -------------------------------------------------------------------------
+  // Status do chamado durante o fluxo
+  // -------------------------------------------------------------------------
+
+  static function managesTicketStatus(): bool {
+    $config = PluginEscalationConfig::getConfig();
+    return (string) ($config['manage_ticket_status'] ?? '1') === '1';
+  }
+
+  /**
+   * Executa $fn sem as checagens de direito do usuário logado. As mudanças de
+   * status são do fluxo, mas rodam na sessão de quem aprovou (ou do requerente),
+   * que normalmente não tem direito de editar o chamado: sem isso o GLPI
+   * descartaria o campo `status` silenciosamente.
+   */
+  private static function asSystem(callable $fn) {
+    static $depth = 0;
+    if ($depth > 0) return $fn();
+    $depth++;
+    try {
+      if (method_exists('Session', 'callAsSystem')) {
+        return Session::callAsSystem($fn);
+      }
+      // GLPI 10: eleva temporariamente o direito de edição de chamados
+      $had   = isset($_SESSION['glpiactiveprofile']) && array_key_exists('ticket', $_SESSION['glpiactiveprofile']);
+      $saved = $had ? $_SESSION['glpiactiveprofile']['ticket'] : null;
+      if (isset($_SESSION['glpiactiveprofile'])) {
+        $_SESSION['glpiactiveprofile']['ticket'] = (int) $saved | UPDATE;
+      }
+      try {
+        return $fn();
+      } finally {
+        if ($had) {
+          $_SESSION['glpiactiveprofile']['ticket'] = $saved;
+        } elseif (isset($_SESSION['glpiactiveprofile'])) {
+          unset($_SESSION['glpiactiveprofile']['ticket']);
+        }
+      }
+    } finally {
+      $depth--;
+    }
+  }
+
+  /**
+   * Há fluxo pendente cuja etapa atual já gerou validações e aguarda resposta?
+   * (Etapa que espera a solução do chamado ainda não gerou validações: não conta.)
+   */
+  static function isAwaitingApproval(int $ticket_id): bool {
+    global $DB;
+    $flows = $DB->request([
+      'SELECT' => ['id', 'current_step'],
+      'FROM'   => self::getTable(),
+      'WHERE'  => ['tickets_id' => $ticket_id, 'status' => self::STATUS_PENDING],
+    ]);
+    foreach ($flows as $tf) {
+      $ts = self::getTicketStepByOrder((int) $tf['id'], (int) $tf['current_step']);
+      if (
+        $ts
+        && (int) $ts['status'] === PluginEscalationTicketStep::STATUS_PENDING
+        && countElementsInTable('glpi_plugin_escalation_ticketstepapprovers', ['plugin_escalation_ticketsteps_id' => $ts['id']]) > 0
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Alinha o chamado ao estado do fluxo:
+   * - aprovação global fica "Em espera" enquanto houver etapa aguardando resposta
+   *   (o GLPI só enxerga as validações já geradas e marcaria "Aprovada" ao fim de
+   *   cada etapa, liberando o chamado antes das etapas seguintes);
+   * - status PENDENTE enquanto aguarda aprovação;
+   * - com $release, volta de PENDENTE para NOVO quando nada mais aguarda aprovação.
+   */
+  static function syncTicketState(int $ticket_id, bool $release): void {
+    $ticket = new Ticket();
+    if (!$ticket->getFromDB($ticket_id)) return;
+
+    $awaiting = self::isAwaitingApproval($ticket_id);
+    $input    = ['id' => $ticket_id];
+
+    $global = $awaiting
+      ? CommonITILValidation::WAITING
+      : TicketValidation::computeValidationStatus($ticket);
+    if ((int) $ticket->fields['global_validation'] !== $global) {
+      $input['global_validation']    = $global;
+      $input['_from_itilvalidation'] = true;
+    }
+
+    $cancel = false;
+    if (self::managesTicketStatus()) {
+      $status = (int) $ticket->fields['status'];
+      if ($awaiting && in_array($status, [Ticket::INCOMING, Ticket::ASSIGNED, Ticket::PLANNED], true)) {
+        $input['status'] = Ticket::WAITING;
+      } elseif (!$awaiting && $release && $status === Ticket::WAITING) {
+        if ($global === CommonITILValidation::REFUSED) {
+          // Recusa de validação de fora do fluxo (ex.: criada por regra): também cancela
+          $cancel = true;
+        } elseif ($global !== CommonITILValidation::WAITING) {
+          // Só libera quando nenhuma aprovação do chamado (do fluxo ou nativa) está em espera
+          $input['status'] = self::hasAssignedActors($ticket_id) ? Ticket::ASSIGNED : Ticket::INCOMING;
+        }
+      }
+    }
+
+    if (isset($input['status'])) {
+      $input['_escalation_status'] = true;
+    }
+    if (count($input) > 1) {
+      self::asSystem(function () use ($ticket, $input) {
+        $ticket->update($input);
+      });
+    }
+    if ($cancel) {
+      self::cancelTicket($ticket_id, __('Chamado cancelado: aprovação recusada.', 'escalation'));
+    }
+  }
+
+  private static function hasAssignedActors(int $ticket_id): bool {
+    $where = ['tickets_id' => $ticket_id, 'type' => CommonITILActor::ASSIGN];
+    return countElementsInTable('glpi_tickets_users', $where) > 0
+      || countElementsInTable('glpi_groups_tickets', $where) > 0
+      || countElementsInTable('glpi_suppliers_tickets', $where) > 0;
+  }
+
+  /**
+   * Soluciona o chamado como cancelado (fluxo reprovado ou expirado).
+   * Se uma regra de negócio já o colocou em Solucionado sem registrar solução,
+   * registra a solução de cancelamento sem mexer de novo no status.
+   */
+  private static function cancelTicket(int $ticket_id, string $reason): void {
+    if (!self::managesTicketStatus()) return;
+
+    $ticket = new Ticket();
+    if (!$ticket->getFromDB($ticket_id)) return;
+
+    $config = PluginEscalationConfig::getConfig();
+    $input  = [
+      'itemtype'         => 'Ticket',
+      'items_id'         => $ticket_id,
+      'content'          => $reason,
+      'solutiontypes_id' => (int) ($config['refused_solutiontypes_id'] ?? 0),
+    ];
+
+    $done = array_merge(Ticket::getSolvedStatusArray(), Ticket::getClosedStatusArray());
+    if (in_array((int) $ticket->fields['status'], $done)) {
+      $has_solution = countElementsInTable(ITILSolution::getTable(), [
+        'itemtype' => 'Ticket',
+        'items_id' => $ticket_id,
+        'NOT'      => ['status' => CommonITILValidation::REFUSED],
+      ]) > 0;
+      if ($has_solution) return;
+      $input['_do_not_compute_status'] = true;
+    }
+
+    self::asSystem(function () use ($input) {
+      $solution = new ITILSolution();
+      $solution->add($input);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -266,8 +441,9 @@ class PluginEscalationTicketFlow extends CommonDBTM {
 
     $step_name = $step_data['name'] ?? '';
     $step_type = $step_data['type'] ?? PluginEscalationStep::TYPE_PEOPLE;
-    $approvers = [];
-    $skip      = false;
+    $approvers     = [];
+    $skip          = false;
+    $self_approved = false;
 
     if ($step_type === PluginEscalationStep::TYPE_HIERARCHY) {
       if (!empty($step_data['auto_hierarchy_dynamic'])) {
@@ -289,9 +465,14 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         $requesters   = self::getTicketActors($ticket->getID(), CommonITILActor::REQUESTER);
         foreach ($requesters as $req_id) {
           $found = self::traverseHierarchy((int) $req_id, $target_level);
-          if ($found !== null) {
-            $approvers[] = $found;
+          if ($found === null) continue;
+          // O próprio requerente já está no nível exigido (ou acima): a etapa já
+          // nasce aprovada para ele, sem pedir que aprove o próprio chamado.
+          if ($found === (int) $req_id) {
+            $self_approved = true;
+            continue;
           }
+          $approvers[] = $found;
         }
         $approvers = array_values(array_unique(array_filter($approvers)));
         if (empty($approvers)) $skip = true;
@@ -347,9 +528,13 @@ class PluginEscalationTicketFlow extends CommonDBTM {
 
     // Auto-avanço quando não há aprovadores
     if ($skip || empty($approvers)) {
-      $content = $skip
-        ? sprintf(__('⚡ Etapa "%s" ignorada — sem aprovador hierárquico definido.', 'escalation'), $step_name)
-        : sprintf(__('⚡ Etapa "%s" aprovada automaticamente (sem aprovadores configurados).', 'escalation'), $step_name);
+      if ($self_approved) {
+        $content = sprintf(__('⚡ Etapa "%s" aprovada automaticamente — o requerente já possui o nível hierárquico exigido.', 'escalation'), $step_name);
+      } elseif ($skip) {
+        $content = sprintf(__('⚡ Etapa "%s" ignorada — sem aprovador hierárquico definido.', 'escalation'), $step_name);
+      } else {
+        $content = sprintf(__('⚡ Etapa "%s" aprovada automaticamente (sem aprovadores configurados).', 'escalation'), $step_name);
+      }
       self::addDebugFollowup($ticket->getID(), $content);
 
       $DB->update(PluginEscalationTicketStep::getTable(), [
@@ -405,15 +590,26 @@ class PluginEscalationTicketFlow extends CommonDBTM {
    * Se o chamado tem um fluxo ativo cuja etapa atual é AUTO, avança ou rejeita conforme o resultado.
    */
   static function validationUpdated(CommonDBTM $item): void {
-    global $DB;
-
     if (!$item instanceof TicketValidation) return;
+    $ticket_id = (int) $item->fields['tickets_id'];
+    // Também reage a validações de fora do fluxo (ex.: criadas por regra) em chamados com fluxo:
+    // mantém PENDENTE entre etapas e libera para NOVO só quando nada mais aguarda aprovação.
+    if (self::processValidationAnswer($item) || self::countActiveFlows($ticket_id) > 0) {
+      self::syncTicketState($ticket_id, true);
+    }
+  }
+
+  /**
+   * @return bool true se a resposta pertence a uma etapa de fluxo em andamento
+   */
+  private static function processValidationAnswer(TicketValidation $item): bool {
+    global $DB;
 
     $status    = (int) $item->fields['status'];
     $accepted  = CommonITILValidation::ACCEPTED;
     $refused   = CommonITILValidation::REFUSED;
     $waiting   = CommonITILValidation::WAITING;
-    if (!in_array($status, [$accepted, $refused])) return;
+    if (!in_array($status, [$accepted, $refused])) return false;
 
     $ticket_id = (int) $item->fields['tickets_id'];
 
@@ -423,15 +619,15 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       'WHERE' => ['tickets_id' => $ticket_id, 'status' => self::STATUS_PENDING],
       'LIMIT' => 1,
     ])->current();
-    if (!$tf_row) return;
+    if (!$tf_row) return false;
 
     // Etapa atual em andamento
     $current_ts = self::getTicketStepByOrder($tf_row['id'], $tf_row['current_step']);
-    if (!$current_ts || $current_ts['status'] !== PluginEscalationTicketStep::STATUS_PENDING) return;
+    if (!$current_ts || $current_ts['status'] !== PluginEscalationTicketStep::STATUS_PENDING) return false;
 
     // Verificar se a etapa atual usa TicketValidations (generate_immediately ou após solução)
     $step_def = new PluginEscalationStep();
-    if (!$step_def->getFromDB($current_ts['plugin_escalation_steps_id'])) return;
+    if (!$step_def->getFromDB($current_ts['plugin_escalation_steps_id'])) return false;
 
     if ($status === $refused) {
       // Qualquer recusa rejeita o fluxo
@@ -440,7 +636,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         'completed_at' => $_SESSION['glpi_currenttime'],
       ], ['id' => $current_ts['id']]);
       self::completeFlow($tf_row['id'], self::STATUS_REJECTED);
-      return;
+      return true;
     }
 
     // Carregar aprovadores registrados para esta etapa
@@ -456,7 +652,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
     // Sem registro de aprovadores → fallback: aguardar pending=0 no chamado (comportamento anterior)
     if (empty($step_approver_ids)) {
       $pending = countElementsInTable(TicketValidation::getTable(), ['tickets_id' => $ticket_id, 'status' => $waiting]);
-      if ($pending > 0) return;
+      if ($pending > 0) return true;
     } else {
       // Contar quantos aprovadores desta etapa já aprovaram
       $approved_where = ['tickets_id' => $ticket_id, 'status' => $accepted];
@@ -483,7 +679,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
         $reached = $approved_count >= $total;
       }
 
-      if (!$reached) return;
+      if (!$reached) return true;
 
       // Quórum atingido: cancelar validações ainda pendentes dos demais aprovadores
       if ($quorum !== PluginEscalationStep::QUORUM_ALL) {
@@ -513,6 +709,7 @@ class PluginEscalationTicketFlow extends CommonDBTM {
       'completed_at' => $_SESSION['glpi_currenttime'],
     ], ['id' => $current_ts['id']]);
     self::advanceFlow($tf_row['id']);
+    return true;
   }
 
   static function resolveApprovers(array $step_data, Ticket $ticket): array {

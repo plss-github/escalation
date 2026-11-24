@@ -51,6 +51,15 @@ Go to **Setup → Configuration → Escalation**.
 
 Add a level mapping for each organisational level (level 1 = highest, level N = lowest).
 
+| Setting | Description |
+|---|---|
+| Manage ticket status | *(default: Yes)* Ticket stays **Pending** while any step awaits approval, goes to **New** once every step is approved, and is **Solved** (cancelled) when a step is refused or times out |
+| Solution type on refusal | Solution type recorded on the cancelling solution (e.g. *Cancelado*) |
+
+**Business rules:** with status management on, the plugin coexists with ticket rules that set the status from the approval status (e.g. *approval waiting → Pending*, *approval accepted → New*, *approval refused → Solved*). While a step is awaiting approval the global approval stays *Waiting*, so such rules never release the ticket early. A ticket solved by a rule without a solution still gets the cancelling solution. Approvals generated on solution never move a solved/closed ticket back (rule status changes are discarded on those updates). Native approvals created by rules in the same ticket are honoured: the ticket stays Pending until they are answered, and a refusal cancels it.
+
+In a fixed-level **Hierarchy** step, a requester who already holds the required level (or a higher one) is not asked to approve their own ticket: the step is approved automatically for them.
+
 ### 2 — Approval flows
 
 Go to **Administration → Escalation → Flows**.

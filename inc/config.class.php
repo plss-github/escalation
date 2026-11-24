@@ -34,7 +34,9 @@ class PluginEscalationConfig extends CommonGLPI {
 
   static function getDefaults(): array {
     return [
-      'hierarchy_type' => 'Group', // 'Group' ou 'UserCategory'
+      'hierarchy_type'           => 'Group', // 'Group' ou 'UserCategory'
+      'manage_ticket_status'     => '1',     // PENDENTE durante a aprovação; NOVO ao aprovar; solucionado ao reprovar
+      'refused_solutiontypes_id' => '0',     // tipo de solução usado ao cancelar por reprovação
     ];
   }
 
@@ -113,6 +115,31 @@ class PluginEscalationConfig extends CommonGLPI {
     echo "</td>";
     echo "<td colspan='2'><span class='text-muted'>" .
       __('Define se os níveis hierárquicos são identificados pelo grupo ou pela categoria do usuário.', 'escalation') .
+      "</span></td>";
+    echo "</tr>";
+
+    echo "<tr class='tab_bg_1'>";
+    echo "<td>" . __('Controlar status do chamado', 'escalation') . "</td>";
+    echo "<td>";
+    Dropdown::showYesNo('manage_ticket_status', (int) ($config['manage_ticket_status'] ?? 1));
+    echo "</td>";
+    echo "<td colspan='2'><span class='text-muted'>" .
+      __('Pendente enquanto aguarda aprovação, Novo quando todas as etapas forem aprovadas e Solucionado (cancelado) quando uma etapa for reprovada.', 'escalation') .
+      "</span></td>";
+    echo "</tr>";
+
+    echo "<tr class='tab_bg_1'>";
+    echo "<td>" . __('Tipo de solução ao reprovar', 'escalation') . "</td>";
+    echo "<td>";
+    SolutionType::dropdown([
+      'name'  => 'refused_solutiontypes_id',
+      'value' => (int) ($config['refused_solutiontypes_id'] ?? 0),
+      'entity' => 0,
+      'entity_sons' => true,
+    ]);
+    echo "</td>";
+    echo "<td colspan='2'><span class='text-muted'>" .
+      __('Ex.: Cancelado. Usado na solução registrada quando o fluxo é reprovado ou expira.', 'escalation') .
       "</span></td>";
     echo "</tr>";
 
